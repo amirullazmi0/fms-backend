@@ -1,0 +1,515 @@
+// Skema database FMS (dipakai Prisma cuma buat migrasi; backend Go query langsung lewat lib/pq).
+// Asal: fmctest/prisma/schema.prisma, ditambah konvensi kratify:
+//   - users: refresh token, is_active, soft delete + audit
+//   - tabel master (devices, sites, routes, drivers, shift_templates, shifts): deleted_at + created_by/updated_by/deleted_by
+//   - role & permission (pola presiden-solusi): roles, permissions, role_permissions, users.role_id
+// Tabel log/time-series (records, events, commands, places, assignments, trips) nggak pakai soft delete.
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Auth ----------
+
+model User {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String    @unique
+  name            String?
+  passwordHash    String    @map("password_hash") // bcrypt (hash scrypt lama dari demo masih dikenali, diganti bcrypt pas login)
+  roleId          String    @map("role_id") @db.Uuid
+  /// Superuser: lolos semua cek role & permission, boleh masuk fms-administrator.
+  isAdministrator Boolean   @default(false) @map("is_administrator")
+  isActive        Boolean   @default(true) @map("is_active")
+  refreshToken    String?   @map("refresh_token") // sha256 dari refresh token aktif
+  tokenExpiry     DateTime? @map("token_expiry") @db.Timestamptz(3)
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdBy       String?   @map("created_by") @db.Uuid
+  updatedBy       String?   @map("updated_by") @db.Uuid
+  deletedBy       String?   @map("deleted_by") @db.Uuid
+  role            Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  sessions        Session[]
+  shiftsCreated   Shift[]   @relation("ShiftCreatedBy")
+  shiftsClosed    Shift[]   @relation("ShiftClosedBy")
+
+  @@index([roleId], map: "idx_user_role")
+  @@map("users")
+}
+
+/// Role yang bisa diatur dari dashboard. Satu role boleh is_default (dipakai kalau user dibikin tanpa role);
+/// index unik parsial idx_roles_single_default ada di migrasi (Prisma nggak bisa nulis index parsial).
+model Role {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String           @unique @db.VarChar(100)
+  isDefault       Boolean          @default(false) @map("is_default")
+  /// Boleh masuk aplikasi fms-administrator (atur role, permission, user).
+  isAdministrator Boolean          @default(false) @map("is_administrator")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime?        @map("deleted_at") @db.Timestamptz(3)
+  createdBy       String?          @map("created_by") @db.Uuid
+  updatedBy       String?          @map("updated_by") @db.Uuid
+  deletedBy       String?          @map("deleted_by") @db.Uuid
+  users           User[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+/// Katalog permission. Nama = konstanta di internal/model/permission.go; diisi lewat migrasi.
+model Permission {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String           @unique @db.VarChar(100)
+  description     String?
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime?        @map("deleted_at") @db.Timestamptz(3)
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime   @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt    DateTime?  @map("deleted_at") @db.Timestamptz(3)
+  createdBy    String?    @map("created_by") @db.Uuid
+  updatedBy    String?    @map("updated_by") @db.Uuid
+  deletedBy    String?    @map("deleted_by") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@index([roleId, permissionId], map: "idx_role_permission")
+  @@map("role_permissions")
+}
+
+/// Deprecated: session cookie demo lama. Auth sekarang JWT access + refresh token (users.refresh_token).
+model Session {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash String   @unique(map: "sessions_token_hash_key") @map("token_hash")
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  userAgent String?  @map("user_agent")
+  ip        String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId], map: "sessions_user_id")
+  @@map("sessions")
+}
+
+// ---------- Tracking ----------
+
+/// Satu baris per alat, primary key IMEI. Alat baru otomatis ketambah waktu pertama konek.
+model Device {
+  imei            String       @id
+  name            String?
+  plate           String?
+  vehicle         String?
+  firstSeen       DateTime     @map("first_seen") @db.Timestamptz(3)
+  lastSeen        DateTime?    @map("last_seen") @db.Timestamptz(3)
+  lastConnectedAt DateTime?    @map("last_connected_at") @db.Timestamptz(3)
+  lastRemote      String?      @map("last_remote")
+  updatedAt       DateTime     @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  createdBy       String?      @map("created_by") @db.Uuid
+  updatedBy       String?      @map("updated_by") @db.Uuid
+  deletedBy       String?      @map("deleted_by") @db.Uuid
+  records         Record[]
+  events          Event[]
+  commands        Command[]
+  assignments     Assignment[]
+  trips           Trip[]
+
+  siteVisits SiteVisit[]
+
+  @@map("devices")
+}
+
+/// Record AVL dari alat: posisi + semua IO (JSONB, key = AVL ID).
+model Record {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  imei       String
+  time       DateTime @db.Timestamptz(3)
+  receivedAt DateTime @map("received_at") @db.Timestamptz(3)
+  lat        Float
+  lng        Float
+  alt        Int
+  angle      Int
+  sats       Int
+  speed      Int
+  priority   Int
+  eventIo    Int      @map("event_io")
+  valid      Boolean
+  io         Json
+  device     Device   @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([imei, time, eventIo, priority], map: "records_unique")
+  @@index([imei, time], map: "records_imei_time")
+  @@map("records")
+}
+
+/// Event hasil deteksi (ignition, overspeed, BBM, koneksi, ...).
+model Event {
+  id     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  imei   String
+  time   DateTime @db.Timestamptz(3)
+  level  String // info | warn | crit
+  kind   String
+  text   String
+  device Device   @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([time], map: "events_time")
+  @@map("events")
+}
+
+/// Perintah GPRS (Codec 12) ke alat dan balasannya.
+model Command {
+  id     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  imei   String
+  time   DateTime @db.Timestamptz(3)
+  dir    String // out = ke alat, in = balasan alat
+  text   String
+  device Device   @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([imei, time], map: "commands_imei_time")
+  @@map("commands")
+}
+
+/// Cache nama jalan dari OpenStreetMap (key = "lat,lng" dibuletin 4 desimal).
+model Place {
+  key       String   @id
+  label     String?
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz(3)
+
+  @@map("places")
+}
+
+// Master titik (geofence). Peran loading/unloading ditentuin di rute; satu titik bisa dipakai banyak rute.
+model Site {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  lat             Float
+  lng             Float
+  radiusM         Int       @default(10) @map("radius_m")
+  note            String?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdBy       String?   @map("created_by") @db.Uuid
+  updatedBy       String?   @map("updated_by") @db.Uuid
+  deletedBy       String?   @map("deleted_by") @db.Uuid
+  loadingRoutes   Route[]   @relation("RouteLoading")
+  unloadingRoutes Route[]   @relation("RouteUnloading")
+
+  siteVisits SiteVisit[]
+
+  @@map("sites")
+}
+
+// Rute = 1 titik loading + 1 titik unloading. Driver & truk masuk lewat penugasan shift.
+model Route {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  loadingSiteId   String       @map("loading_site_id") @db.Uuid
+  unloadingSiteId String       @map("unloading_site_id") @db.Uuid
+  note            String?
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime     @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  createdBy       String?      @map("created_by") @db.Uuid
+  updatedBy       String?      @map("updated_by") @db.Uuid
+  deletedBy       String?      @map("deleted_by") @db.Uuid
+  loadingSite     Site         @relation("RouteLoading", fields: [loadingSiteId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unloadingSite   Site         @relation("RouteUnloading", fields: [unloadingSiteId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignments     Assignment[]
+  shifts          Shift[]
+  trips           Trip[]
+
+  siteVisits SiteVisit[]
+
+  @@index([loadingSiteId], map: "routes_loading_site_id")
+  @@index([unloadingSiteId], map: "routes_unloading_site_id")
+  @@map("routes")
+}
+
+enum ShiftStatus {
+  planned
+  active
+  closed
+
+  @@map("shift_status")
+}
+
+enum ShiftCloseReason {
+  manual
+  auto
+
+  @@map("shift_close_reason")
+}
+
+enum TripStatus {
+  done
+  unfinished
+
+  @@map("trip_status")
+}
+
+// go = berangkat (loading → unloading), back = pulang (unloading → loading)
+enum TripLeg {
+  go
+  back
+
+  @@map("trip_leg")
+}
+
+model Driver {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  phone       String?
+  employeeNo  String?      @map("employee_no")
+  ibutton     String?
+  active      Boolean      @default(true)
+  note        String?
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  createdBy   String?      @map("created_by") @db.Uuid
+  updatedBy   String?      @map("updated_by") @db.Uuid
+  deletedBy   String?      @map("deleted_by") @db.Uuid
+  assignments Assignment[]
+  trips       Trip[]
+
+  siteVisits SiteVisit[]
+
+  @@map("drivers")
+}
+
+model ShiftTemplate {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  startTime DateTime  @map("start_time") @db.Time(0)
+  endTime   DateTime  @map("end_time") @db.Time(0)
+  autoClose Boolean   @default(true) @map("auto_close")
+  sort      Int       @default(0)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  @@map("shift_templates")
+}
+
+model Shift {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String
+  routeId      String?           @map("route_id") @db.Uuid // 1 shift = 1 rute
+  date         DateTime          @db.Date
+  plannedStart DateTime          @map("planned_start") @db.Timestamptz(3)
+  plannedEnd   DateTime          @map("planned_end") @db.Timestamptz(3)
+  autoClose    Boolean           @default(true) @map("auto_close")
+  status       ShiftStatus       @default(planned)
+  startedAt    DateTime?         @map("started_at") @db.Timestamptz(3)
+  closedAt     DateTime?         @map("closed_at") @db.Timestamptz(3)
+  closeReason  ShiftCloseReason? @map("close_reason")
+  overdueNoted Boolean           @default(false) @map("overdue_noted")
+  createdById  String?           @map("created_by") @db.Uuid
+  closedById   String?           @map("closed_by") @db.Uuid
+  note         String?
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime          @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt    DateTime?         @map("deleted_at") @db.Timestamptz(3)
+  updatedBy    String?           @map("updated_by") @db.Uuid
+  deletedBy    String?           @map("deleted_by") @db.Uuid
+  createdBy    User?             @relation("ShiftCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  closedBy     User?             @relation("ShiftClosedBy", fields: [closedById], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  route        Route?            @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignments  Assignment[]
+  trips        Trip[]
+
+  siteVisits SiteVisit[]
+
+  @@index([date], map: "shifts_date")
+  @@index([routeId], map: "shifts_route_id")
+  @@index([status], map: "shifts_status")
+  @@map("shifts")
+}
+
+// Penugasan satu shift: driver bawa truk di rute tertentu, berlaku start_at..end_at.
+// Pindah rute / ganti truk di tengah shift = penugasan lama ditutup, yang baru dibuka.
+model Assignment {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shiftId   String    @map("shift_id") @db.Uuid
+  driverId  String    @map("driver_id") @db.Uuid
+  imei      String
+  routeId   String    @map("route_id") @db.Uuid
+  note      String?
+  startAt   DateTime? @map("start_at") @db.Timestamptz(3) // null = dari awal shift
+  endAt     DateTime? @map("end_at") @db.Timestamptz(3) // null = masih berlaku
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  shift     Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  driver    Driver    @relation(fields: [driverId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  device    Device    @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+  route     Route     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  trips     Trip[]
+
+  siteVisits SiteVisit[]
+
+  @@index([shiftId], map: "assignments_shift_id")
+  @@map("assignments")
+}
+
+// Ritase tersimpan (dasar laporan). Nama rute & titik disalin biar laporan lama nggak berubah.
+model Trip {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assignmentId    String?     @map("assignment_id") @db.Uuid
+  shiftId         String?     @map("shift_id") @db.Uuid
+  driverId        String?     @map("driver_id") @db.Uuid
+  imei            String
+  routeId         String?     @map("route_id") @db.Uuid
+  routeName       String      @map("route_name")
+  loadingSiteId   String?     @map("loading_site_id") @db.Uuid
+  loadingName     String      @map("loading_name")
+  unloadingSiteId String?     @map("unloading_site_id") @db.Uuid
+  unloadingName   String      @map("unloading_name")
+  departAt        DateTime    @map("depart_at") @db.Timestamptz(3)
+  arriveAt        DateTime?   @map("arrive_at") @db.Timestamptz(3)
+  durationMs      BigInt      @map("duration_ms")
+  distanceM       Float       @map("distance_m")
+  movingMs        BigInt      @map("moving_ms")
+  stops           Int
+  stoppedMs       BigInt      @map("stopped_ms")
+  maxSpeed        Int         @map("max_speed")
+  avgSpeed        Float       @map("avg_speed")
+  fuelUnit        String?     @map("fuel_unit")
+  fuelAtLoading   Float?      @map("fuel_at_loading")
+  fuelAtUnloading Float?      @map("fuel_at_unloading")
+  fuelUsed        Float?      @map("fuel_used")
+  loadDwellMs     BigInt      @map("load_dwell_ms")
+  unloadDwellMs   BigInt?     @map("unload_dwell_ms")
+  status          TripStatus
+  leg             TripLeg     @default(go)
+  computedAt      DateTime    @default(now()) @map("computed_at") @db.Timestamptz(3)
+  assignment      Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  shift           Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  driver          Driver?     @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  device          Device      @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+  route           Route?      @relation(fields: [routeId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([imei, departAt], map: "trips_imei_depart")
+  @@index([departAt], map: "trips_depart_at")
+  @@index([shiftId], map: "trips_shift_id")
+  @@map("trips")
+}
+
+// ---------- Fitur ----------
+
+/// Fitur & konfigurasi yang diatur dari fms-administrator (mis. "simulation").
+model Feature {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String    @unique @db.VarChar(100)
+  name        String    @db.VarChar(150)
+  description String?
+  enabled     Boolean   @default(false)
+  config      Json      @default("{}")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+  deletedBy   String?   @map("deleted_by") @db.Uuid
+
+  @@map("features")
+}
+
+// ---------- Waktu di titik ----------
+
+enum SiteVisitRole {
+  loading
+  unloading
+
+  @@map("site_visit_role")
+}
+
+enum SiteVisitStatus {
+  inside
+  done
+
+  @@map("site_visit_status")
+}
+
+/// Satu kali truk ada di radius titik loading/unloading rutenya. departAt null = masih di dalam.
+model SiteVisit {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assignmentId String?         @map("assignment_id") @db.Uuid
+  shiftId      String?         @map("shift_id") @db.Uuid
+  driverId     String?         @map("driver_id") @db.Uuid
+  imei         String
+  routeId      String?         @map("route_id") @db.Uuid
+  siteId       String          @map("site_id") @db.Uuid
+  siteName     String          @map("site_name")
+  role         SiteVisitRole
+  arriveAt     DateTime        @map("arrive_at") @db.Timestamptz(3)
+  departAt     DateTime?       @map("depart_at") @db.Timestamptz(3)
+  dwellMs      BigInt          @map("dwell_ms")
+  status       SiteVisitStatus
+  computedAt   DateTime        @default(now()) @map("computed_at") @db.Timestamptz(3)
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  assignment   Assignment?     @relation(fields: [assignmentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  shift        Shift?          @relation(fields: [shiftId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  driver       Driver?         @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  device       Device          @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+  route        Route?          @relation(fields: [routeId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  site         Site            @relation(fields: [siteId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([imei, siteId, arriveAt], map: "site_visits_imei_site_arrive")
+  @@index([arriveAt], map: "site_visits_arrive_at")
+  @@index([shiftId], map: "site_visits_shift_id")
+  @@index([assignmentId], map: "site_visits_assignment_id")
+  @@map("site_visits")
+}
+
+// ---------- Data jalan ----------
+
+/// Jalur jalan yang udah dihitung (from → to). coords = [[lat, lng], ...].
+model RoadPath {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key        String   @unique @db.VarChar(32)
+  fromLat    Float    @map("from_lat")
+  fromLng    Float    @map("from_lng")
+  toLat      Float    @map("to_lat")
+  toLng      Float    @map("to_lng")
+  coords     Json
+  pointCount Int      @map("point_count")
+  distanceM  Float    @map("distance_m")
+  durationS  Float    @map("duration_s")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz(3)
+
+  @@index([createdAt], map: "road_paths_created_at")
+  @@map("road_paths")
+}
+
+/// Data jalan OSM (Overpass) per kotak area, disimpan seminggu.
+model RoadArea {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key          String   @unique @db.VarChar(120)
+  kind         String   @db.VarChar(10)
+  south        Float
+  west         Float
+  north        Float
+  east         Float
+  elements     Json
+  elementCount Int      @map("element_count")
+  sizeBytes    Int      @map("size_bytes")
+  fetchedAt    DateTime @default(now()) @map("fetched_at") @db.Timestamptz(3)
+
+  @@map("road_areas")
+}

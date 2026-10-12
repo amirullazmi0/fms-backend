@@ -1,0 +1,21 @@
+{
+     "name": "fms-backend",
+     "version": "1.0.0",
+     "description": "FMS (Fleet Management System) backend: Gin + raw SQL, Prisma for migrations only.",
+     "private": true,
+     "scripts": {
+          "migrate:dev": "prisma migrate dev",
+          "migrate:deploy": "prisma migrate deploy",
+          "migrate:status": "prisma migrate status",
+          "migrate:baseline": "prisma migrate resolve --applied 0_init",
+          "db:pull": "prisma db pull",
+          "db:seed": "go run main.go -seed",
+          "studio": "prisma studio"
+     },
+     "devDependencies": {
+          "prisma": "^7.2.0"
+     },
+     "dependencies": {
+          "dotenv": "^17.2.3"
+     }
+}

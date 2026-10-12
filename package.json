@@ -10,7 +10,8 @@
           "migrate:baseline": "prisma migrate resolve --applied 0_init",
           "db:pull": "prisma db pull",
           "db:seed": "go run main.go -seed",
-          "studio": "prisma studio"
+          "studio": "prisma studio",
+          "deploy:vps": "caprover deploy"
      },
      "devDependencies": {
           "prisma": "^7.2.0"

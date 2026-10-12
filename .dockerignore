@@ -1,0 +1,8 @@
+.git
+.env
+node_modules
+data
+logs
+tmp
+*.log
+*.exe

@@ -117,6 +117,7 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to access config file: %w", err)
 	}
 
+	viper.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")
 	viper.SetDefault("APP_PORT", "3100")
 	viper.SetDefault("DEVICE_PORT", "3101")
 	viper.SetDefault("TUNNEL", "auto")
@@ -170,7 +171,7 @@ func LoadConfig() (*Config, error) {
 			RefreshExpiredHour: viper.GetInt("JWT_REFRESH_EXPIRED_HOUR"),
 		},
 		CORS: CORSConfig{
-			AllowedOrigins: strings.Split(viper.GetString("CORS_ALLOWED_ORIGINS"), ","),
+			AllowedOrigins: origins(viper.GetString("CORS_ALLOWED_ORIGINS")),
 		},
 		Logger: LoggerConfig{
 			Format:   strings.TrimSpace(viper.GetString("LOG_FORMAT")),
@@ -238,4 +239,18 @@ func (c *DatabaseConfig) Label() string {
 		return "postgres://" + u
 	}
 	return fmt.Sprintf("postgres://%s:%s/%s", c.Host, c.Port, c.Name)
+}
+
+// origins splits a comma list and drops blanks (an empty entry would make the CORS middleware panic).
+func origins(list string) []string {
+	out := []string{}
+	for _, o := range strings.Split(list, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"http://localhost:3000", "http://localhost:3001"}
+	}
+	return out
 }

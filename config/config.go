@@ -70,7 +70,10 @@ type LoggerConfig struct {
 // DeviceConfig is the Teltonika TCP listener (FMC150 trackers connect here).
 type DeviceConfig struct {
 	Port string
-	// Tunnel: auto | ngrok | bore | 0 (see pkg/tunnel).
+	// Tunnel (TUNNEL=true): open a public ngrok tunnel (bore.pub if ngrok fails) for devices
+	// on 4G while developing. false = no tunnel at all (deployed: devices dial the VPS directly).
+	Tunnel bool
+	// TunnelMode for pkg/tunnel: auto (ngrok, bore fallback) | ngrok | bore.
 	TunnelMode     string
 	NgrokAuthtoken string
 	BoreHost       string
@@ -120,7 +123,7 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")
 	viper.SetDefault("APP_PORT", "3100")
 	viper.SetDefault("DEVICE_PORT", "3101")
-	viper.SetDefault("TUNNEL", "auto")
+	viper.SetDefault("TUNNEL", "false")
 	viper.SetDefault("BORE_HOST", "bore.pub")
 	viper.SetDefault("APP_DATA_DIR", "data")
 	viper.SetDefault("JWT_EXPIRED_HOUR", 1)
@@ -133,6 +136,7 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("DB_SSL_MODE", "disable")
 	viper.SetDefault("DB_TIMEZONE", "Asia/Jakarta")
 
+	tunnelOn, tunnelMode := tunnelOf(viper.GetString("TUNNEL"))
 	tz := strings.TrimSpace(viper.GetString("TZ_REPORT"))
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
@@ -180,11 +184,12 @@ func LoadConfig() (*Config, error) {
 		},
 		Device: DeviceConfig{
 			Port:           viper.GetString("DEVICE_PORT"),
-			TunnelMode:     strings.TrimSpace(viper.GetString("TUNNEL")),
+			Tunnel:         tunnelOn,
+			TunnelMode:     tunnelMode,
 			NgrokAuthtoken: strings.TrimSpace(viper.GetString("NGROK_AUTHTOKEN")),
 			BoreHost:       strings.TrimSpace(viper.GetString("BORE_HOST")),
-			TunnelHost: strings.TrimSpace(viper.GetString("TUNNEL_HOST")),
-			TunnelPort: viper.GetInt("TUNNEL_PORT"),
+			TunnelHost:     strings.TrimSpace(viper.GetString("TUNNEL_HOST")),
+			TunnelPort:     viper.GetInt("TUNNEL_PORT"),
 		},
 		Routing: RoutingConfig{
 			Enabled:     viper.GetBool("ROUTING"),
@@ -253,4 +258,19 @@ func origins(list string) []string {
 		return []string{"http://localhost:3000", "http://localhost:3001"}
 	}
 	return out
+}
+
+// tunnelOf reads TUNNEL: true/false (also 1/0, yes/no, on/off). The old values
+// auto | ngrok | bore still mean "on" with that provider.
+func tunnelOf(v string) (bool, string) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "yes", "on", "auto":
+		return true, "auto"
+	case "ngrok":
+		return true, "ngrok"
+	case "bore":
+		return true, "bore"
+	default:
+		return false, ""
+	}
 }

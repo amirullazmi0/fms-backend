@@ -19,10 +19,11 @@ RUN mkdir -p /app/data
 
 # HTTP API (CapRover "Container HTTP Port") + FMC150 device TCP port.
 # On the VPS the devices connect straight to DEVICE_PORT: add a CapRover Port Mapping
-# 3101 -> 3101 and keep TUNNEL=0 (no ngrok/bore needed).
+# 3101 -> 3101. TUNNEL=false: no ngrok/bore at all. Set TUNNEL_HOST=<vps domain> and
+# TUNNEL_PORT=3101 so the dashboard shows the address for the device SMS setup.
 ENV APP_PORT=3308
 ENV DEVICE_PORT=3101
-ENV TUNNEL=0
+ENV TUNNEL=false
 ENV APP_DATA_DIR=/app/data
 ENV TZ=Asia/Jakarta
 EXPOSE 3308 3101

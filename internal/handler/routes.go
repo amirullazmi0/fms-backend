@@ -88,9 +88,13 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			logger.Fatal("Device TCP listener failed", zap.Error(err))
 		}
 	}()
-	if cfg.Device.TunnelHost != "" {
+	switch {
+	case cfg.Device.TunnelHost != "":
+		// Fixed public address (e.g. the VPS domain + DEVICE_PORT): shown in the dashboard for the SMS setup.
 		liveTracker.SetTunnel(&tunnel.Info{Host: cfg.Device.TunnelHost, Port: cfg.Device.TunnelPort, Provider: "manual"})
-	} else {
+	case !cfg.Device.Tunnel:
+		logger.Info("Tunnel off (TUNNEL=false): devices connect straight to DEVICE_PORT")
+	default:
 		devicePort, _ := strconv.Atoi(cfg.Device.Port)
 		tunnels := tunnel.New(tunnel.Options{
 			Mode:       cfg.Device.TunnelMode,

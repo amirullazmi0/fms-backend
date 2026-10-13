@@ -118,14 +118,16 @@ type DBCounts struct {
 }
 
 type ServerStatus struct {
-	StartedAt  int64       `json:"startedAt"`
-	Port       int         `json:"port"`
-	LanIps     []string    `json:"lanIps"`
-	Tunnel     *TunnelInfo `json:"tunnel"`
-	DevicePort int         `json:"devicePort"`
-	DB         DBCounts    `json:"db"`
-	Connected  int         `json:"connected"`
-	Devices    int         `json:"devices"`
+	StartedAt int64       `json:"startedAt"`
+	Port      int         `json:"port"`
+	LanIps    []string    `json:"lanIps"`
+	Tunnel    *TunnelInfo `json:"tunnel"`
+	// TunnelEnabled: TUNNEL=true. false = deployed, devices dial the server directly.
+	TunnelEnabled bool     `json:"tunnelEnabled"`
+	DevicePort    int      `json:"devicePort"`
+	DB            DBCounts `json:"db"`
+	Connected     int      `json:"connected"`
+	Devices       int      `json:"devices"`
 }
 
 type DeviceMeta struct {

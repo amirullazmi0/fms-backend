@@ -20,14 +20,15 @@ func (t *Tracker) Status() dto.ServerStatus {
 		tunnel = &cp
 	}
 	return dto.ServerStatus{
-		StartedAt:  t.startedAt,
-		Port:       port,
-		LanIps:     lanIps(),
-		Tunnel:     tunnel,
-		DevicePort: devicePort,
-		DB:         t.counts,
-		Connected:  len(t.conns),
-		Devices:    len(t.state),
+		StartedAt:     t.startedAt,
+		Port:          port,
+		LanIps:        lanIps(),
+		Tunnel:        tunnel,
+		TunnelEnabled: t.cfg.Device.Tunnel,
+		DevicePort:    devicePort,
+		DB:            t.counts,
+		Connected:     len(t.conns),
+		Devices:       len(t.state),
 	}
 }
 

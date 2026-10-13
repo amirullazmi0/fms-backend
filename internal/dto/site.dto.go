@@ -21,13 +21,16 @@ type UpsertSiteRequest struct {
 	Note   *string  `json:"note" validate:"omitempty,max=200"`
 }
 
-// OnDuty is who is running a route right now (active shift, open assignment).
+// OnDuty is who is running a route: phase active (shift running), finishing (shift stopped,
+// last ritase still heading to unloading) or done (shift finished in the last 12 h).
 type OnDuty struct {
 	ShiftID    string `json:"shiftId"`
 	ShiftName  string `json:"shiftName"`
 	DriverID   string `json:"driverId"`
 	DriverName string `json:"driverName"`
 	Imei       string `json:"imei"`
+	Phase      string `json:"phase"`
+	ClosedAt   *int64 `json:"closedAt"`
 }
 
 // Route is one loading site + one unloading site.
@@ -38,6 +41,7 @@ type Route struct {
 	UnloadingID string   `json:"unloadingId"`
 	Note        *string  `json:"note"`
 	OnDuty      []OnDuty `json:"onDuty"`
+	RecentDone  []OnDuty `json:"recentDone,omitempty"` // trucks done with a shift of this route (last 12 h)
 	Imeis       []string `json:"imeis"`
 	CreatedAt   int64    `json:"createdAt"`
 	UpdatedAt   int64    `json:"updatedAt"`

@@ -30,6 +30,7 @@ const (
 	dayMs         = 24 * 3600_000
 	lateArrivalMs = 6 * 3600_000
 	tickEvery     = time.Minute
+	finishingMs   = 60_000
 	recomputeMs   = 5 * 60_000
 	recordLimit   = 200000
 )
@@ -45,6 +46,7 @@ type Scheduler struct {
 
 	running       atomic.Bool
 	lastRecompute int64
+	lastFinishing int64
 	recomputeMu   sync.Mutex // one recompute at a time (tick vs. API triggers)
 }
 
@@ -151,16 +153,26 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 	if err != nil || s.visits == nil {
 		return changed, err
 	}
-	n, err := s.visits.ReplaceVisits(ctx, a.ID, visitsOf(records, shift, a, route, sites, start, end))
+	// The ritase still on its way when the shift stopped: its arrival at unloading belongs here.
+	var lastArrival *int64
+	for _, t := range rep.Trips {
+		if t.Leg == "go" && t.Start < end && t.Unloading != nil && t.Unloading.Arrive >= end {
+			arr := t.Unloading.Arrive
+			lastArrival = &arr
+		}
+	}
+	n, err := s.visits.ReplaceVisits(ctx, a.ID, visitsOf(records, shift, a, route, sites, start, end, lastArrival))
 	return changed + n, err
 }
 
 // visitsOf: stays at the route's loading/unloading sites during the assignment. Passing
 // through without stopping (zero dwell) is not a stay.
-func visitsOf(records []dto.AvlRecord, shift dto.Shift, a dto.Assignment, route dto.Route, sites []dto.Site, start, end int64) []dto.SiteVisitUpsert {
+func visitsOf(records []dto.AvlRecord, shift dto.Shift, a dto.Assignment, route dto.Route, sites []dto.Site, start, end int64, lastArrival *int64) []dto.SiteVisitUpsert {
 	out := []dto.SiteVisitUpsert{}
+	closed := shift.ClosedAt != nil || a.EndAt != nil
 	for _, v := range analytics.FindVisits(records, sites) {
-		if v.DwellMs <= 0 || v.Arrive >= end || (v.Depart != nil && *v.Depart <= start) {
+		finalStop := lastArrival != nil && v.Arrive == *lastArrival
+		if v.DwellMs <= 0 || (v.Arrive >= end && !finalStop) || (v.Depart != nil && *v.Depart <= start) {
 			continue
 		}
 		role := "unloading"
@@ -170,6 +182,8 @@ func visitsOf(records []dto.AvlRecord, shift dto.Shift, a dto.Assignment, route 
 		out = append(out, dto.SiteVisitUpsert{
 			AssignmentID: a.ID, ShiftID: shift.ID, DriverID: a.DriverID, Imei: a.Imei, RouteID: route.ID,
 			SiteID: v.SiteID, SiteName: v.Name, Role: role, ArriveAt: v.Arrive, DepartAt: v.Depart, DwellMs: v.DwellMs,
+			// Still there when the shift is over: the truck is done ("Selesai"), not waiting.
+			Finished: closed && v.Depart == nil,
 		})
 	}
 	return out
@@ -264,6 +278,16 @@ func (s *Scheduler) tick(ctx context.Context) {
 		s.tracker.Changed("shifts")
 	}
 
+	// A stopped shift with a truck still driving its last ritase: check every minute, so the
+	// truck shows "Selesai" soon after it reaches unloading.
+	if now-s.lastFinishing >= finishingMs && now-s.lastRecompute < recomputeMs {
+		s.lastFinishing = now
+		if fin, err := s.shifts.FinishingShifts(ctx); err == nil && len(fin) > 0 {
+			if s.Recompute(ctx, fin) == 0 {
+				s.tracker.Changed("sites") // phase may still change (arrival seen), refresh duty
+			}
+		}
+	}
 	if now-s.lastRecompute >= recomputeMs {
 		s.lastRecompute = now
 		active, err1 := s.shifts.ActiveShifts(ctx)

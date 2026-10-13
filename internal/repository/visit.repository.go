@@ -58,7 +58,9 @@ func (r *visitRepository) ReplaceVisits(ctx context.Context, assignmentID string
 		   OR site_visits.assignment_id IS DISTINCT FROM EXCLUDED.assignment_id OR site_visits.status IS DISTINCT FROM EXCLUDED.status`
 	for _, v := range visits {
 		status := "done"
-		if v.DepartAt == nil {
+		if v.Finished {
+			status = "finished"
+		} else if v.DepartAt == nil {
 			status = "inside"
 		}
 		query, args := database.NewInsertBuilder("site_visits").
@@ -123,8 +125,8 @@ func (r *visitRepository) Report(ctx context.Context, f dto.TripFilter, now int6
 		       COUNT(*) FILTER (WHERE v.status = 'done'),
 		       COALESCE(AVG(v.dwell_ms) FILTER (WHERE v.status = 'done'), 0),
 		       COALESCE(MIN(v.dwell_ms) FILTER (WHERE v.status = 'done'), 0),
-		       COALESCE(MAX(`+dwell+`), 0),
-		       COALESCE(SUM(`+dwell+`), 0),
+		       COALESCE(MAX(`+dwell+`) FILTER (WHERE v.status <> 'finished'), 0),
+		       COALESCE(SUM(`+dwell+`) FILTER (WHERE v.status <> 'finished'), 0),
 		       COUNT(*) FILTER (WHERE v.status = 'inside')
 		FROM site_visits v WHERE `+where+`
 		GROUP BY v.site_id, v.site_name, v.role ORDER BY v.role, v.site_name`, args...)

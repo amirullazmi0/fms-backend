@@ -20,6 +20,8 @@ type ShiftRepository interface {
 	ActiveShifts(ctx context.Context) ([]dto.Shift, error)
 	// RecentlyClosedShifts: a ritase that departed before closing may arrive later.
 	RecentlyClosedShifts(ctx context.Context, withinMs int64) ([]dto.Shift, error)
+	// FinishingShifts: closed shifts with a truck still on its last ritase to unloading.
+	FinishingShifts(ctx context.Context) ([]dto.Shift, error)
 	// PreviousShift: the latest earlier shift on the same route that has assignments.
 	PreviousShift(ctx context.Context, id string) (*dto.Shift, error)
 	CreateShift(ctx context.Context, s dto.ShiftInput, createdBy string) (string, error)
@@ -177,6 +179,14 @@ func (r *shiftRepository) RecentlyClosedShifts(ctx context.Context, withinMs int
 	return r.queryShifts(ctx, shifts().
 		Where("s.status = 'closed'").
 		Where("s.closed_at > $1", database.FromMs(database.NowMs()-withinMs)))
+}
+
+func (r *shiftRepository) FinishingShifts(ctx context.Context) ([]dto.Shift, error) {
+	return r.queryShifts(ctx, shifts().
+		Where("s.status = 'closed'").
+		Where("s.closed_at > now() - interval '6 hours'").
+		Where(`EXISTS (SELECT 1 FROM assignments a JOIN shifts sh ON sh.id = a.shift_id
+			WHERE a.shift_id = s.id AND a.end_at IS NULL AND `+FinishingTrip+`)`))
 }
 
 func (r *shiftRepository) PreviousShift(ctx context.Context, id string) (*dto.Shift, error) {

@@ -13,8 +13,28 @@ import (
 	"github.com/lib/pq"
 )
 
-// onDuty = assignments still valid: active shift + assignment not closed.
-const onDuty = `assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'active' AND sh.deleted_at IS NULL AND a.end_at IS NULL`
+// FinishingTrip: the assignment's last trip left loading before the shift closed and has not
+// reached unloading yet. The truck finishes that ritase (max 6 h, the scheduler's late-arrival
+// window), then it is done. Shared with the simulator (pkg/simulator).
+const FinishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go' AND t.arrive_at IS NULL
+	AND t.depart_at <= sh.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id))`
+
+// onDuty = what trucks are working on: an active shift (phase active), or a closed shift whose
+// last ritase is still heading to unloading (phase finishing).
+const onDuty = `(SELECT a.id, a.imei, a.driver_id, a.route_id, sh.id AS shift_id, sh.name AS shift_name, 'active' AS phase, NULL::timestamptz AS closed_at
+		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'active' AND sh.deleted_at IS NULL
+		WHERE a.end_at IS NULL
+	UNION ALL
+	SELECT a.id, a.imei, a.driver_id, a.route_id, sh.id, sh.name, 'finishing', sh.closed_at
+		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'closed' AND sh.deleted_at IS NULL
+			AND sh.closed_at > now() - interval '6 hours'
+		WHERE a.end_at IS NULL AND ` + FinishingTrip + `) a`
+
+// recentDone = assignments of shifts closed in the last 12 h whose truck is done (not finishing).
+const recentDone = `(SELECT a.id, a.imei, a.driver_id, a.route_id, sh.id AS shift_id, sh.name AS shift_name, 'done' AS phase, sh.closed_at
+		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'closed' AND sh.deleted_at IS NULL
+			AND sh.closed_at > now() - interval '12 hours'
+		WHERE a.end_at IS NULL AND NOT ` + FinishingTrip + `) a`
 
 // SiteRepository covers sites (geofence points) and routes (loading -> unloading).
 type SiteRepository interface {
@@ -199,8 +219,12 @@ func (r *siteRepository) RoutesUsingSite(ctx context.Context, id string) ([]stri
 
 var routeColumns = []string{
 	"r.id", "r.name", "r.loading_site_id", "r.unloading_site_id", "r.note", "r.created_at", "r.updated_at",
-	`(SELECT json_agg(json_build_object('shiftId', sh.id, 'shiftName', sh.name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei) ORDER BY d.name)
+	`(SELECT json_agg(json_build_object('shiftId', a.shift_id, 'shiftName', a.shift_name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
+			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint) ORDER BY d.name)
 		FROM ` + onDuty + ` JOIN drivers d ON d.id = a.driver_id WHERE a.route_id = r.id) AS on_duty`,
+	`(SELECT json_agg(json_build_object('shiftId', a.shift_id, 'shiftName', a.shift_name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
+			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint) ORDER BY a.closed_at DESC)
+		FROM ` + recentDone + ` JOIN drivers d ON d.id = a.driver_id WHERE a.route_id = r.id) AS recent_done`,
 }
 
 func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {
@@ -210,8 +234,8 @@ func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {
 		var x dto.Route
 		var note sql.NullString
 		var created, updated time.Time
-		var duty []byte
-		if err := rows.Scan(&x.ID, &x.Name, &x.LoadingID, &x.UnloadingID, &note, &created, &updated, &duty); err != nil {
+		var duty, done []byte
+		if err := rows.Scan(&x.ID, &x.Name, &x.LoadingID, &x.UnloadingID, &note, &created, &updated, &duty, &done); err != nil {
 			return nil, err
 		}
 		x.Note = database.NullString(note)
@@ -219,6 +243,12 @@ func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {
 		x.OnDuty = []dto.OnDuty{}
 		if len(duty) > 0 {
 			if err := json.Unmarshal(duty, &x.OnDuty); err != nil {
+				return nil, err
+			}
+		}
+		x.RecentDone = []dto.OnDuty{}
+		if len(done) > 0 {
+			if err := json.Unmarshal(done, &x.RecentDone); err != nil {
 				return nil, err
 			}
 		}

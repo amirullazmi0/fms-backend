@@ -132,6 +132,7 @@ type SiteVisitUpsert struct {
 	ArriveAt     int64
 	DepartAt     *int64 // nil = still inside
 	DwellMs      int64
+	Finished     bool // still inside when the shift ended (status finished)
 }
 
 // DwellStats: time spent at one kind of site in the period.
@@ -187,7 +188,7 @@ type SiteVisitRecord struct {
 	RouteName  *string `json:"routeName"`
 	SiteName   string  `json:"siteName"`
 	Role       string  `json:"role"`   // loading | unloading
-	Status     string  `json:"status"` // inside | done
+	Status     string  `json:"status"` // inside | done | finished (shift ended while there)
 	ArriveAt   int64   `json:"arriveAt"`
 	DepartAt   *int64  `json:"departAt"`
 	DwellMs    int64   `json:"dwellMs"` // inside: until now

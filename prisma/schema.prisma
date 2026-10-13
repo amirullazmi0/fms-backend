@@ -441,6 +441,7 @@ enum SiteVisitRole {
 enum SiteVisitStatus {
   inside
   done
+  finished
 
   @@map("site_visit_status")
 }

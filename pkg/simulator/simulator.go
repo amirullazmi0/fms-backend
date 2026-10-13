@@ -58,9 +58,10 @@ type path struct {
 	points   []latLng
 	loopFrom int
 	depots   map[int]bool // indexes where the truck stops to load/unload
+	unload   int          // index of the unloading site (-1 = none)
 }
 
-var loopPath = &path{key: "loop", name: "loop Jakarta", points: loopRoute, depots: map[int]bool{}}
+var loopPath = &path{key: "loop", name: "loop Jakarta", points: loopRoute, depots: map[int]bool{}, unload: -1}
 
 func ll(p latLng) routing.LatLng { return routing.LatLng{Lat: p[0], Lng: p[1]} }
 
@@ -130,7 +131,7 @@ func routePath(ctx context.Context, key, name string, from, l, u latLng) (*path,
 	points := append(append(append([]latLng{}, gol...), lu[1:]...), ul[1:len(ul)-1]...)
 	li := len(gol) - 1     // loading index
 	ui := li + len(lu) - 1 // unloading index
-	return &path{key: key, name: name, points: points, loopFrom: li, depots: map[int]bool{li: true, ui: true}}, nil
+	return &path{key: key, name: name, points: points, loopFrom: li, depots: map[int]bool{li: true, ui: true}, unload: ui}, nil
 }
 
 func rad(d float64) float64 { return d * math.Pi / 180 }
@@ -167,6 +168,8 @@ type greenEvent struct {
 type routeInfo struct {
 	id, name string
 	l, u     latLng
+	// finish: the shift was stopped; drive on to unloading, unload, then park there.
+	finish bool
 }
 
 type fakeDevice struct {
@@ -184,6 +187,7 @@ type fakeDevice struct {
 	ign        bool
 	parkTicks  int
 	depotTicks int
+	finish     bool    // shift stopped: stop after the next unloading
 	odometer   float64 // metres
 	trip       float64
 	fuel       float64 // 0.1 L
@@ -236,6 +240,7 @@ func (d *fakeDevice) position() latLng {
 // setRoute is called on every database read. nil = not on a route → park.
 func (d *fakeDevice) setRoute(ctx context.Context, r *routeInfo) {
 	d.mu.Lock()
+	d.finish = r != nil && r.finish
 	key := ""
 	if r != nil {
 		key = fmt.Sprintf("%s|%v|%v", r.id, r.l, r.u)
@@ -319,6 +324,14 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 	if d.depotTicks > 0 {
 		// At a demo site: still, engine on, tipper open.
 		d.depotTicks--
+		if d.depotTicks == 0 && d.finish && d.seg == d.path.unload {
+			// Last unloading of a stopped shift: park here (routeKey kept, so the same route
+			// is not started again on the next sync).
+			d.here, d.path, d.ign, d.door = d.path.points[d.seg], nil, false, 0
+			d.logf("ritase terakhir selesai di unloading, parkir")
+			d.speed = 0
+			return nil
+		}
 		if d.depotTicks > 2 {
 			d.door = 1
 		} else {
@@ -606,6 +619,11 @@ func (d *fakeDevice) session(ctx context.Context) {
 	}
 }
 
+// finishingTrip mirrors repository.FinishingTrip (s = the closed shift): the assignment's last
+// trip left loading before the close and has not reached unloading yet.
+const finishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go' AND t.arrive_at IS NULL
+	AND t.depart_at <= s.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id))`
+
 // syncRoutes reads each simulated truck's route from the active shift assignments.
 func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 	imeis := make([]string, len(fleet))
@@ -615,14 +633,17 @@ func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 	warned := false
 	for {
 		rows, err := database.NewQueryBuilder("assignments a").
-			Select("DISTINCT ON (a.imei) a.imei", "r.id", "r.name", "l.lat", "l.lng", "u.lat", "u.lng").
-			InnerJoin("shifts s", "s.id = a.shift_id AND s.status = 'active' AND s.deleted_at IS NULL").
+			// Active shift, or a stopped one whose last ritase still heads to unloading (finish it).
+			Select("DISTINCT ON (a.imei) a.imei", "r.id", "r.name", "l.lat", "l.lng", "u.lat", "u.lng", "s.status = 'closed'").
+			InnerJoin("shifts s", `s.id = a.shift_id AND s.deleted_at IS NULL AND (s.status = 'active' OR (s.status = 'closed'
+				AND s.closed_at > now() - interval '6 hours' AND `+finishingTrip+`))`).
 			InnerJoin("routes r", "r.id = a.route_id").
 			InnerJoin("sites l", "l.id = r.loading_site_id").
 			InnerJoin("sites u", "u.id = r.unloading_site_id").
 			WhereNull("a.end_at").
 			Where("a.imei = ANY($1::text[])", pq.Array(imeis)).
 			OrderBy("a.imei").
+			OrderBy("s.status = 'closed'"). // an active assignment wins over finishing an old one
 			OrderBy("COALESCE(a.start_at, s.started_at) DESC").
 			ExecuteContext(ctx, db)
 		if err != nil {
@@ -636,7 +657,7 @@ func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 			for rows.Next() {
 				var imei string
 				var r routeInfo
-				if rows.Scan(&imei, &r.id, &r.name, &r.l[0], &r.l[1], &r.u[0], &r.u[1]) == nil {
+				if rows.Scan(&imei, &r.id, &r.name, &r.l[0], &r.l[1], &r.u[0], &r.u[1], &r.finish) == nil {
 					by[imei] = &r
 				}
 			}
@@ -664,7 +685,7 @@ type Options struct {
 	OverpassURL string
 	// DB: routes of active shift assignments are read from here every 20 s.
 	// nil = trucks never get a route (they park, or loop with Loop).
-	DB   *sql.DB
+	DB *sql.DB
 	// RoadStore keeps computed road paths (nil = files under DataDir/roads).
 	RoadStore routing.Store
 	Logf      func(format string, args ...any)

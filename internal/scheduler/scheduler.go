@@ -31,6 +31,7 @@ const (
 	lateArrivalMs = 6 * 3600_000
 	tickEvery     = time.Minute
 	finishingMs   = 60_000
+	claimSlackMs  = 30 * 60_000 // a stay may start this long before the assignment
 	recomputeMs   = 5 * 60_000
 	recordLimit   = 200000
 )
@@ -175,6 +176,11 @@ func visitsOf(records []dto.AvlRecord, shift dto.Shift, a dto.Assignment, route 
 		if v.DwellMs <= 0 || (v.Arrive >= end && !finalStop) || (v.Depart != nil && *v.Depart <= start) {
 			continue
 		}
+		// A truck already parked there long before this assignment (e.g. overnight after the
+		// previous shift) is not this assignment's stay: it stays with the earlier one.
+		if v.Arrive < start-claimSlackMs {
+			continue
+		}
 		role := "unloading"
 		if v.SiteID == route.LoadingID {
 			role = "loading"
@@ -286,6 +292,12 @@ func (s *Scheduler) tick(ctx context.Context) {
 			if s.Recompute(ctx, fin) == 0 {
 				s.tracker.Changed("sites") // phase may still change (arrival seen), refresh duty
 			}
+		}
+	}
+	// Safety net: a stay can only be "inside" while its shift runs.
+	if s.visits != nil {
+		if n, err := s.visits.CloseStale(ctx); err == nil && n > 0 {
+			s.tracker.Changed("trips")
 		}
 	}
 	if now-s.lastRecompute >= recomputeMs {

@@ -16,6 +16,8 @@ import (
 type VisitRepository interface {
 	// ReplaceVisits stores the stays of one assignment (drops the ones no longer found).
 	ReplaceVisits(ctx context.Context, assignmentID string, visits []dto.SiteVisitUpsert) (int, error)
+	// CloseStale marks stays still "inside" whose shift is closed (or assignment ended) as finished.
+	CloseStale(ctx context.Context) (int, error)
 	Report(ctx context.Context, f dto.TripFilter, now int64) (*dto.VisitReport, error)
 	// ListVisits: raw stays in the period, newest first. role = "" | loading | unloading.
 	ListVisits(ctx context.Context, f dto.TripFilter, role string, limit, offset int, now int64) ([]dto.SiteVisitRecord, int, error)
@@ -27,6 +29,17 @@ type visitRepository struct {
 
 func NewVisitRepository(db *sql.DB) VisitRepository {
 	return &visitRepository{db: db}
+}
+
+func (r *visitRepository) CloseStale(ctx context.Context) (int, error) {
+	res, err := database.RawExecContext(ctx, r.db, `UPDATE site_visits v SET status = 'finished', computed_at = CURRENT_TIMESTAMP
+		FROM assignments a JOIN shifts s ON s.id = a.shift_id
+		WHERE a.id = v.assignment_id AND v.status = 'inside' AND (s.status = 'closed' OR a.end_at IS NOT NULL)`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 func (r *visitRepository) ReplaceVisits(ctx context.Context, assignmentID string, visits []dto.SiteVisitUpsert) (int, error) {

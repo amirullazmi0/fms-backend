@@ -206,7 +206,7 @@ var reportGroups = map[string]groupSQL{
 	"truck":  {"t.imei", "MAX(COALESCE(v.plate, v.name, t.imei))", "MAX(v.vehicle)", "label"},
 	"shift":  {"COALESCE(t.shift_id::text, '-')", "COALESCE(MAX(s.name), 'Tanpa shift')", "MAX(to_char(s.date, 'YYYY-MM-DD'))", "sub DESC, label"},
 	"day":    {"to_char(t.depart_at AT TIME ZONE $TZ, 'YYYY-MM-DD')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'YYYY-MM-DD')", "NULL", "label DESC"},
-	// Per jam (waktu GPS berangkat dari loading), key = "YYYY-MM-DD HH".
+	// Per jam (waktu GPS berangkat dari front loading), key = "YYYY-MM-DD HH".
 	"hour": {"to_char(t.depart_at AT TIME ZONE $TZ, 'YYYY-MM-DD HH24')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'HH24:00')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'YYYY-MM-DD')", "key"},
 }
 
@@ -234,7 +234,7 @@ var aggColumns = []string{
 	"AVG(t.fuel_used) FILTER (WHERE " + legGo + " AND t.status = 'done')::float",
 	"AVG(t.fuel_at_loading) FILTER (WHERE " + legGo + " AND t.status = 'done')::float",
 	"AVG(t.fuel_at_unloading) FILTER (WHERE " + legGo + " AND t.status = 'done')::float",
-	// Tonase: ritase yang sampai unloading × truck factor (trip lama tanpa snapshot pakai payload unit sekarang).
+	// Tonase: ritase yang tiba di dumping × truck factor (trip lama tanpa snapshot pakai payload unit sekarang).
 	"COALESCE(SUM(COALESCE(t.payload_ton, v.payload_ton)) FILTER (WHERE " + legGo + " AND t.status = 'done'), 0)::float",
 	// Waktu siklus: dua arah + waktu di loading/unloading (ritase selesai).
 	"COALESCE(SUM(t.duration_ms + t.load_dwell_ms) FILTER (WHERE t.status = 'done'), 0)::float",

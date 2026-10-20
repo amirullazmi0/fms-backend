@@ -81,14 +81,14 @@ func (u *featureUsecase) Update(ctx context.Context, actor *model.Actor, key str
 		}
 	}
 	if req.Enabled == nil && config == nil {
-		return nil, apperror.BadRequest("Nggak ada yang diubah")
+		return nil, apperror.BadRequest("Tidak ada yang diubah")
 	}
 	ok, err := u.repo.Update(ctx, key, req.Enabled, config, actor.ID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Fitur nggak ada")
+		return nil, apperror.NotFound("Fitur tidak ditemukan")
 	}
 	// Switching the simulation off stops a running simulator.
 	if key == model.FeatureSimulation && req.Enabled != nil && !*req.Enabled {
@@ -102,7 +102,7 @@ func (u *featureUsecase) Update(ctx context.Context, actor *model.Actor, key str
 func validSimulation(raw json.RawMessage) error {
 	var c dto.SimulationConfig
 	if err := json.Unmarshal(raw, &c); err != nil {
-		return apperror.BadRequest("Config simulasi nggak valid")
+		return apperror.BadRequest("Config simulasi tidak valid")
 	}
 	if c.Devices < 1 || c.Devices > 50 {
 		return apperror.BadRequest("Jumlah unit simulasi 1–50")
@@ -155,7 +155,7 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 		return nil, err
 	}
 	if f == nil || !f.Enabled {
-		return nil, apperror.Forbidden("Fitur simulasi lagi dimatiin. Nyalain dulu di menu Fitur.")
+		return nil, apperror.Forbidden("Fitur simulasi sedang nonaktif. Aktifkan terlebih dahulu di menu Fitur.")
 	}
 	if req.Devices != nil {
 		c.Devices = *req.Devices
@@ -167,7 +167,7 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 	u.mu.Lock()
 	if u.cancel != nil || simulator.Running() {
 		u.mu.Unlock()
-		return nil, apperror.Conflict("Simulasi udah jalan")
+		return nil, apperror.Conflict("Simulasi sudah berjalan")
 	}
 	runCtx, cancel := context.WithCancel(u.root)
 	done := make(chan struct{})
@@ -205,8 +205,8 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 	}()
 
 	u.setRunning(ctx, true, actor.ID)
-	logger.Info(fmt.Sprintf("Simulasi jalan: %d unit, tiap %d detik", c.Devices, c.Interval))
-	u.tracker.Notice("info", "Simulasi jalan", fmt.Sprintf("%d unit palsu konek ke server, kirim data tiap %d detik.", c.Devices, c.Interval), "")
+	logger.Info(fmt.Sprintf("Simulasi berjalan: %d unit, setiap %d detik", c.Devices, c.Interval))
+	u.tracker.Notice("info", "Simulasi berjalan", fmt.Sprintf("%d unit simulasi terhubung ke server, mengirim data setiap %d detik.", c.Devices, c.Interval), "")
 	u.tracker.Changed("simulation")
 	return u.status(true, c), nil
 }
@@ -214,7 +214,7 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 func (u *featureUsecase) StopSimulation(ctx context.Context, actor *model.Actor) (*dto.SimulationStatus, error) {
 	u.setRunning(ctx, false, actor.ID)
 	if !u.stop(actor.ID) {
-		return nil, apperror.Conflict("Simulasi nggak lagi jalan")
+		return nil, apperror.Conflict("Simulasi sedang tidak berjalan")
 	}
 	return u.SimulationStatus(ctx)
 }
@@ -256,7 +256,7 @@ func (u *featureUsecase) setRunning(ctx context.Context, running bool, by string
 		return
 	}
 	if _, err := u.repo.Update(ctx, model.FeatureSimulation, nil, raw, by); err != nil {
-		logger.Warn("simulator: gagal nyimpen status jalan: " + err.Error())
+		logger.Warn("simulator: gagal menyimpan status berjalan: " + err.Error())
 	}
 }
 
@@ -270,5 +270,5 @@ func (u *featureUsecase) ResumeSimulation(ctx context.Context) {
 		logger.Warn("simulator: gagal lanjutin simulasi: " + err.Error())
 		return
 	}
-	logger.Info("Simulasi dilanjutin otomatis (tadi masih jalan waktu server berhenti)")
+	logger.Info("Simulasi dilanjutkan otomatis (sebelumnya masih berjalan saat server berhenti)")
 }

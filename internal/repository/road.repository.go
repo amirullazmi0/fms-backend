@@ -65,7 +65,7 @@ func (r *roadRepository) PutPath(ctx context.Context, key string, from, to routi
 			distance_m = EXCLUDED.distance_m, duration_s = EXCLUDED.duration_s, last_used_at = CURRENT_TIMESTAMP`,
 		key, from.Lat, from.Lng, to.Lat, to.Lng, string(coords), len(res.Coords), res.Distance, res.DurationS)
 	if err != nil {
-		logger.Warn("Gagal nyimpen jalur jalan: " + err.Error())
+		logger.Warn("Gagal menyimpan jalur jalan: " + err.Error())
 	}
 }
 
@@ -87,7 +87,7 @@ func (r *roadRepository) PutArea(ctx context.Context, key string, bbox [4]float6
 			size_bytes = EXCLUDED.size_bytes, fetched_at = CURRENT_TIMESTAMP`,
 		key, kind, bbox[0], bbox[1], bbox[2], bbox[3], string(raw), elements, len(raw))
 	if err != nil {
-		logger.Warn("Gagal nyimpen data jalan area: " + err.Error())
+		logger.Warn("Gagal menyimpan data jalan area: " + err.Error())
 	}
 }
 

@@ -55,7 +55,7 @@ func (h *RoadHandler) GetPath(c *gin.Context) {
 		return
 	}
 	if p == nil {
-		response.Error(c, http.StatusNotFound, "Jalur nggak ada", nil)
+		response.Error(c, http.StatusNotFound, "Jalur tidak ditemukan", nil)
 		return
 	}
 	response.Success(c, http.StatusOK, "Road path retrieved successfully", p)
@@ -77,7 +77,7 @@ func (h *RoadHandler) DeletePath(c *gin.Context) {
 		return
 	}
 	if !found {
-		response.Error(c, http.StatusNotFound, "Jalur nggak ada", nil)
+		response.Error(c, http.StatusNotFound, "Jalur tidak ditemukan", nil)
 		return
 	}
 	routing.Invalidate()
@@ -130,7 +130,7 @@ func (h *RoadHandler) DeleteArea(c *gin.Context) {
 		return
 	}
 	if !found {
-		response.Error(c, http.StatusNotFound, "Area nggak ada", nil)
+		response.Error(c, http.StatusNotFound, "Area tidak ditemukan", nil)
 		return
 	}
 	routing.Invalidate()

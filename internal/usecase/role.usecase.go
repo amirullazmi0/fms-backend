@@ -14,9 +14,9 @@ import (
 )
 
 var (
-	errRoleNotFound      = apperror.NotFound("Role nggak ada")
-	errRoleNameTaken     = apperror.Conflict("Nama role udah dipakai")
-	errRoleIsDefault     = apperror.Conflict("Role ini role default buat user baru, pilih role default lain dulu")
+	errRoleNotFound      = apperror.NotFound("Role tidak ditemukan")
+	errRoleNameTaken     = apperror.Conflict("Nama role sudah dipakai")
+	errRoleIsDefault     = apperror.Conflict("Role ini adalah role default untuk user baru, pilih role default lain terlebih dahulu")
 	errLastRoleWithGuard = apperror.Conflict("Minimal satu role harus tetap punya permission " + model.PermissionUserUpdateRole)
 	errLastAdminRole     = apperror.Conflict("Minimal satu role harus tetap administrator (bisa masuk fms-administrator)")
 )
@@ -86,7 +86,7 @@ func (u *roleUsecase) resolvePermissionIDs(ctx context.Context, names []string) 
 		ids = append(ids, id)
 	}
 	if len(missing) > 0 {
-		return nil, apperror.BadRequest("Permission nggak dikenal: " + strings.Join(missing, ", "))
+		return nil, apperror.BadRequest("Permission tidak dikenal: " + strings.Join(missing, ", "))
 	}
 	return ids, nil
 }
@@ -282,7 +282,7 @@ func (u *roleUsecase) Delete(ctx context.Context, actor *model.Actor, id string)
 		return err
 	}
 	if n := users[id]; n > 0 {
-		return apperror.Conflict(fmt.Sprintf("Role masih dipakai %d user, pindahin dulu user-nya", n))
+		return apperror.Conflict(fmt.Sprintf("Role masih dipakai %d user, pindahkan user tersebut terlebih dahulu", n))
 	}
 	if err := u.assertGuardSurvives(ctx, id, nil); err != nil {
 		return err

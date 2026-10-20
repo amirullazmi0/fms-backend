@@ -219,7 +219,7 @@ func (g *RoadGraph) overpassOnce(ctx context.Context, endpoint, q string) ([]osm
 	if res.StatusCode != http.StatusOK {
 		busy := ""
 		if res.StatusCode == 429 || res.StatusCode == 504 {
-			busy = " (lagi sibuk)"
+			busy = " (sedang sibuk)"
 		}
 		return nil, fmt.Errorf("Overpass balas %d%s", res.StatusCode, busy)
 	}
@@ -423,7 +423,7 @@ func (g *RoadGraph) compute(ctx context.Context, from, to LatLng, key string) (*
 		return &RoadResult{Coords: [][2]float64{{from.Lat, from.Lng}, {to.Lat, to.Lng}}, Distance: straight, DurationS: straight / 5}, nil
 	}
 	if straight > 80000 {
-		return nil, errors.New("Jarak lebih dari 80 km, kejauhan buat dihitung lokal")
+		return nil, errors.New("Jarak lebih dari 80 km, terlalu jauh untuk dihitung lokal")
 	}
 
 	// Box around both points + margin. Long distances skip minor roads to keep the data small.
@@ -448,7 +448,7 @@ func (g *RoadGraph) compute(ctx context.Context, from, to LatLng, key string) (*
 	a, okA := nearest(gr, from, net)
 	b, okB := nearest(gr, to, net)
 	if !okA || !okB {
-		return nil, errors.New("Nggak ada jalan di sekitar titik")
+		return nil, errors.New("Tidak ada jalan di sekitar titik")
 	}
 	ids := astar(gr, a, b)
 	if ids == nil {
@@ -457,7 +457,7 @@ func (g *RoadGraph) compute(ctx context.Context, from, to LatLng, key string) (*
 		ids = astar(gr, a, b)
 	}
 	if ids == nil {
-		return nil, errors.New("Nggak ketemu jalan yang nyambung antar dua titik ini")
+		return nil, errors.New("Tidak ditemukan jalan yang menghubungkan kedua titik ini")
 	}
 
 	coords := [][2]float64{{from.Lat, from.Lng}}

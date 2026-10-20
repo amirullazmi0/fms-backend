@@ -387,7 +387,7 @@ func (r *shiftRepository) ClashOtherShift(ctx context.Context, shiftID, driverID
 	if route.Valid {
 		on = " · " + route.String
 	}
-	return fmt.Sprintf("%s ini udah ada di shift %s%s (%s) yang jamnya bentrok", who, shift, on, date), nil
+	return fmt.Sprintf("%s ini sudah bertugas di shift %s%s (%s) pada jam yang bentrok", who, shift, on, date), nil
 }
 
 func (r *shiftRepository) InsertAssignment(ctx context.Context, shiftID, driverID, imei, routeID string, note *string, startAt *int64) (*dto.Assignment, error) {

@@ -23,7 +23,7 @@ func Seed(db *sql.DB, cfg *config.SeedConfig) error {
 		return fmt.Errorf("seed shift templates: %w", err)
 	}
 	if cfg.Password == "" {
-		logger.Info("SEED_PASSWORD kosong, user nggak di-seed")
+		logger.Info("SEED_PASSWORD kosong, user tidak di-seed")
 		return nil
 	}
 	adminEmail, adminName := cfg.AdminEmail, cfg.AdminName
@@ -68,7 +68,7 @@ func UpsertUser(ctx context.Context, db *sql.DB, email, plain, name, role string
 		return false, err
 	}
 	if r == nil || r.IsDeleted() {
-		return false, fmt.Errorf("role %q nggak ada", role)
+		return false, fmt.Errorf("role %q tidak ditemukan", role)
 	}
 	repo := repository.NewUserRepository(db)
 	existing, err := repo.FindByEmail(ctx, email)
@@ -107,7 +107,7 @@ func SetAdministrator(ctx context.Context, db *sql.DB, email string, on bool) er
 	repo := repository.NewUserRepository(db)
 	u, err := repo.FindByEmail(ctx, email)
 	if err != nil || u == nil {
-		return fmt.Errorf("user %s nggak ada: %v", email, err)
+		return fmt.Errorf("user %s tidak ditemukan: %v", email, err)
 	}
 	_, err = repo.UpdateUser(ctx, u.ID, dto.UpdateUserRequest{IsAdministrator: &on}, nil, u.ID)
 	return err

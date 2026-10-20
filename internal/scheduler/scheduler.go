@@ -94,7 +94,7 @@ func (s *Scheduler) flushLate(ctx context.Context) {
 	for imei, r := range pending {
 		shifts, err := s.shifts.ShiftsTouching(ctx, imei, r.from, r.to, lateArrivalMs)
 		if err != nil {
-			s.log("Gagal cari shift buat data telat: " + err.Error())
+			s.log("Gagal mencari shift untuk data terlambat: " + err.Error())
 			continue
 		}
 		for _, sh := range shifts {
@@ -103,7 +103,7 @@ func (s *Scheduler) flushLate(ctx context.Context) {
 				list = append(list, sh)
 			}
 		}
-		s.log(fmt.Sprintf("Data telat %s (%s s/d %s) → hitung ulang %d shift", imei,
+		s.log(fmt.Sprintf("Data terlambat %s (%s s/d %s) → hitung ulang %d shift", imei,
 			time.UnixMilli(r.from).Format("02/01 15:04"), time.UnixMilli(r.to).Format("02/01 15:04"), len(shifts)))
 	}
 	s.Recompute(ctx, list)
@@ -286,7 +286,7 @@ func (s *Scheduler) Recompute(ctx context.Context, shifts []dto.Shift) int {
 	defer s.recomputeMu.Unlock()
 	list, _, err := s.sites.GetRoutes(ctx, &dto.QueryGlobal{})
 	if err != nil {
-		s.log("Gagal baca rute buat ngitung ritase: " + err.Error())
+		s.log("Gagal membaca rute untuk menghitung ritase: " + err.Error())
 		return 0
 	}
 	routes := map[string]dto.Route{}
@@ -299,7 +299,7 @@ func (s *Scheduler) Recompute(ctx context.Context, shifts []dto.Shift) int {
 		for _, a := range sh.Assignments {
 			n, err := s.computeAssignment(ctx, sh, a, routes, now)
 			if err != nil {
-				s.log(fmt.Sprintf("Gagal ngitung ritase %s (%s): %v", sh.Name, a.Imei, err))
+				s.log(fmt.Sprintf("Gagal menghitung ritase %s (%s): %v", sh.Name, a.Imei, err))
 				continue
 			}
 			changed += n
@@ -357,9 +357,9 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if err := s.shifts.MarkOverdueNoted(ctx, x.ID); err != nil {
 			continue
 		}
-		text := fmt.Sprintf("Shift %s (%s) udah lewat jam selesai dan masih jalan. Tutup atau perpanjang di menu Shift.", x.Name, x.Date)
+		text := fmt.Sprintf("Shift %s (%s) sudah melewati jam selesai dan masih berjalan. Tutup atau perpanjang di menu Shift.", x.Name, x.Date)
 		s.tracker.Log("conn", "", text, "warn")
-		s.tracker.Notice("warn", "Shift lewat jam", text, "/shifts")
+		s.tracker.Notice("warn", "Shift melewati jam selesai", text, "/shifts")
 		changed = true
 	}
 	if changed {
@@ -399,7 +399,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 // Run seeds the default templates and ticks every minute until ctx is done.
 func (s *Scheduler) Run(ctx context.Context) {
 	if err := s.drivers.SeedTemplates(ctx); err != nil {
-		logger.Warn("Gagal bikin template shift awal", zap.Error(err))
+		logger.Warn("Gagal membuat template shift awal", zap.Error(err))
 	}
 	s.tracker.OnLate(s.EnqueueLate)
 	go s.runLate(ctx)

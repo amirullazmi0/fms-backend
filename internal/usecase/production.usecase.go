@@ -61,7 +61,7 @@ func (u *productionUsecase) targetByID(ctx context.Context, id string) (*dto.Pro
 			return &t, nil
 		}
 	}
-	return nil, apperror.NotFound("Target nggak ada")
+	return nil, apperror.NotFound("Target tidak ditemukan")
 }
 
 func (u *productionUsecase) CreateTarget(ctx context.Context, body dto.UpsertTargetRequest, userID string) (*dto.ProductionTarget, error) {
@@ -79,7 +79,7 @@ func (u *productionUsecase) UpdateTarget(ctx context.Context, id string, body dt
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Target nggak ada")
+		return nil, apperror.NotFound("Target tidak ditemukan")
 	}
 	u.tracker.Changed("trips")
 	return u.targetByID(ctx, id)
@@ -91,7 +91,7 @@ func (u *productionUsecase) DeleteTarget(ctx context.Context, id, userID string)
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("Target nggak ada")
+		return apperror.NotFound("Target tidak ditemukan")
 	}
 	u.tracker.Changed("trips")
 	return nil

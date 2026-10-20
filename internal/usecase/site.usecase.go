@@ -80,7 +80,7 @@ func (u *siteUsecase) UpdateSite(ctx context.Context, id string, body dto.Upsert
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Titik nggak ada")
+		return nil, apperror.NotFound("Titik tidak ditemukan")
 	}
 	site, err := u.siteByID(ctx, id)
 	if err != nil {
@@ -98,7 +98,7 @@ func (u *siteUsecase) UpdateZones(ctx context.Context, id string, body dto.Updat
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Titik nggak ada")
+		return nil, apperror.NotFound("Titik tidak ditemukan")
 	}
 	site, err := u.siteByID(ctx, id)
 	if err != nil {
@@ -115,14 +115,14 @@ func (u *siteUsecase) DeleteSite(ctx context.Context, id, userID string) error {
 		return err
 	}
 	if len(used) > 0 {
-		return apperror.Conflict("Titik masih dipakai rute: " + strings.Join(used, ", ") + ". Hapus/ubah rutenya dulu.")
+		return apperror.Conflict("Titik masih dipakai rute: " + strings.Join(used, ", ") + ". Hapus/ubah rutenya terlebih dahulu.")
 	}
 	ok, err := u.siteRepo.DeleteSite(ctx, id, userID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("Titik nggak ada")
+		return apperror.NotFound("Titik tidak ditemukan")
 	}
 	u.tracker.Changed("sites")
 	return nil
@@ -189,7 +189,7 @@ func (u *siteUsecase) UpdateRoute(ctx context.Context, id string, body dto.Upser
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Rute nggak ada")
+		return nil, apperror.NotFound("Rute tidak ditemukan")
 	}
 	route, err := u.siteRepo.GetRouteByID(ctx, id)
 	if err != nil {
@@ -206,14 +206,14 @@ func (u *siteUsecase) DeleteRoute(ctx context.Context, id, userID string) error 
 		return err
 	}
 	if used {
-		return apperror.Conflict("Rute ini udah pernah dipakai di shift, jadi nggak bisa dihapus (laporannya butuh rute ini)")
+		return apperror.Conflict("Rute ini sudah pernah dipakai di shift, sehingga tidak dapat dihapus (laporan membutuhkan rute ini)")
 	}
 	ok, err := u.siteRepo.DeleteRoute(ctx, id, userID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("Rute nggak ada")
+		return apperror.NotFound("Rute tidak ditemukan")
 	}
 	u.tracker.Changed("sites")
 	return nil
@@ -226,7 +226,7 @@ func (u *siteUsecase) RouteHistory(ctx context.Context, id string, days int) (*d
 		return nil, err
 	}
 	if route == nil {
-		return nil, apperror.NotFound("Rute nggak ada")
+		return nil, apperror.NotFound("Rute tidak ditemukan")
 	}
 	if days <= 0 {
 		days = 14
@@ -270,7 +270,7 @@ func (u *siteUsecase) Road(ctx context.Context, fromID, toID string) (*dto.RoadR
 		}
 	}
 	if a == nil || b == nil {
-		return nil, apperror.NotFound("Titik nggak ada")
+		return nil, apperror.NotFound("Titik tidak ditemukan")
 	}
 	road, err := u.router.RoadRoute(ctx, routing.LatLng{Lat: a.Lat, Lng: a.Lng}, routing.LatLng{Lat: b.Lat, Lng: b.Lng})
 	if err != nil {

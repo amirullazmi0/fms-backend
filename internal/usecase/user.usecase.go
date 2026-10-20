@@ -164,7 +164,7 @@ func (u *userUsecase) issueTokens(ctx context.Context, user *model.User) (*dto.A
 
 func (u *userUsecase) Login(ctx context.Context, req *dto.LoginRequest, ip string) (*dto.AuthResponse, error) {
 	if wait := u.lockedFor(ip); wait > 0 {
-		return nil, apperror.New(http.StatusTooManyRequests, fmt.Sprintf("Terlalu banyak percobaan. Coba lagi %d menit lagi.", int(math.Ceil(wait.Minutes()))))
+		return nil, apperror.New(http.StatusTooManyRequests, fmt.Sprintf("Terlalu banyak percobaan. Coba kembali dalam %d menit.", int(math.Ceil(wait.Minutes()))))
 	}
 	user, err := u.userRepo.FindByEmail(ctx, req.Email)
 	if err != nil {
@@ -194,7 +194,7 @@ func (u *userUsecase) Login(ctx context.Context, req *dto.LoginRequest, ip strin
 		}
 	}
 	if err := u.userRepo.MarkLogin(ctx, user.ID); err != nil {
-		logger.Warn("Gagal nyatet waktu login", zap.Error(err))
+		logger.Warn("Gagal mencatat waktu login", zap.Error(err))
 	}
 	now := time.Now()
 	user.LastLoginAt = &now
@@ -203,7 +203,7 @@ func (u *userUsecase) Login(ctx context.Context, req *dto.LoginRequest, ip strin
 
 func (u *userUsecase) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.AuthResponse, error) {
 	if _, err := middleware.ParseToken(req.RefreshToken, middleware.TokenRefresh, u.jwtCfg); err != nil {
-		return nil, apperror.Unauthorized("Refresh token nggak valid atau udah kedaluwarsa")
+		return nil, apperror.Unauthorized("Refresh token tidak valid atau sudah kedaluwarsa")
 	}
 	// The DB only knows the latest token: a rotated (older) one is rejected here.
 	user, err := u.userRepo.FindByRefreshToken(ctx, hashToken(req.RefreshToken))
@@ -211,7 +211,7 @@ func (u *userUsecase) RefreshToken(ctx context.Context, req *dto.RefreshTokenReq
 		return nil, err
 	}
 	if user == nil || !user.IsActive {
-		return nil, apperror.Unauthorized("Refresh token nggak valid atau udah kedaluwarsa")
+		return nil, apperror.Unauthorized("Refresh token tidak valid atau sudah kedaluwarsa")
 	}
 	return u.issueTokens(ctx, user)
 }
@@ -226,7 +226,7 @@ func (u *userUsecase) GetProfile(ctx context.Context, userID string) (*dto.UserR
 		return nil, err
 	}
 	if user == nil {
-		return nil, apperror.NotFound("User nggak ada")
+		return nil, apperror.NotFound("User tidak ditemukan")
 	}
 	r := toUserResponse(user)
 	if r.Permissions, err = u.permissionsOf(ctx, user); err != nil {
@@ -253,7 +253,7 @@ func (u *userUsecase) CreateUser(ctx context.Context, req *dto.CreateUserRequest
 		return "", err
 	}
 	if existing != nil {
-		return "", apperror.Conflict("Email udah dipakai")
+		return "", apperror.Conflict("Email sudah dipakai")
 	}
 	roleID := req.RoleID
 	if roleID == "" {
@@ -268,7 +268,7 @@ func (u *userUsecase) CreateUser(ctx context.Context, req *dto.CreateUserRequest
 	} else if role, err := u.roleRepo.FindByID(ctx, roleID); err != nil {
 		return "", err
 	} else if role == nil {
-		return "", apperror.BadRequest("Role nggak ada")
+		return "", apperror.BadRequest("Role tidak ditemukan")
 	}
 	h, err := password.Hash(req.Password)
 	if err != nil {
@@ -287,7 +287,7 @@ func (u *userUsecase) CreateUser(ctx context.Context, req *dto.CreateUserRequest
 			return "", err
 		}
 		if !ok {
-			return "", apperror.Forbidden("Cuma administrator yang boleh bikin administrator")
+			return "", apperror.Forbidden("Hanya administrator yang boleh membuat administrator")
 		}
 	}
 	return u.userRepo.CreateUser(ctx, req.Email, h, name, roleID, isAdmin, actorID)
@@ -295,18 +295,18 @@ func (u *userUsecase) CreateUser(ctx context.Context, req *dto.CreateUserRequest
 
 func (u *userUsecase) UpdateUser(ctx context.Context, id string, req *dto.UpdateUserRequest, actorID string) error {
 	if id == actorID && req.IsActive != nil && !*req.IsActive {
-		return apperror.BadRequest("Nggak bisa nonaktifin akun sendiri")
+		return apperror.BadRequest("Tidak dapat menonaktifkan akun sendiri")
 	}
 	if req.IsAdministrator != nil {
 		if id == actorID && !*req.IsAdministrator {
-			return apperror.BadRequest("Nggak bisa nyabut status administrator akun sendiri")
+			return apperror.BadRequest("Tidak dapat mencabut status administrator akun sendiri")
 		}
 		ok, err := u.actorIsAdministrator(ctx, actorID)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			return apperror.Forbidden("Cuma administrator yang boleh ngubah status administrator")
+			return apperror.Forbidden("Hanya administrator yang boleh mengubah status administrator")
 		}
 	}
 	var hash *string
@@ -322,7 +322,7 @@ func (u *userUsecase) UpdateUser(ctx context.Context, id string, req *dto.Update
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("User nggak ada")
+		return apperror.NotFound("User tidak ditemukan")
 	}
 	return nil
 }
@@ -335,35 +335,35 @@ func (u *userUsecase) UpdateUserRole(ctx context.Context, id string, req *dto.Up
 		return err
 	}
 	if role == nil {
-		return apperror.BadRequest("Role nggak ada")
+		return apperror.BadRequest("Role tidak ditemukan")
 	}
 	actorAdmin, err := u.actorIsAdministrator(ctx, actorID)
 	if err != nil {
 		return err
 	}
 	if id == actorID && !actorAdmin && !role.IsAdministrator {
-		return apperror.BadRequest("Nggak bisa mindahin akun sendiri ke role non-administrator")
+		return apperror.BadRequest("Tidak dapat memindahkan akun sendiri ke role non-administrator")
 	}
 	ok, err := u.userRepo.UpdateRole(ctx, id, req.RoleID, actorID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("User nggak ada")
+		return apperror.NotFound("User tidak ditemukan")
 	}
 	return nil
 }
 
 func (u *userUsecase) DeleteUser(ctx context.Context, id, actorID string) error {
 	if id == actorID {
-		return apperror.BadRequest("Nggak bisa hapus akun sendiri")
+		return apperror.BadRequest("Tidak dapat menghapus akun sendiri")
 	}
 	ok, err := u.userRepo.DeleteUser(ctx, id, actorID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("User nggak ada")
+		return apperror.NotFound("User tidak ditemukan")
 	}
 	return nil
 }

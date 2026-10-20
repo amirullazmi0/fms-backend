@@ -138,7 +138,7 @@ func (t *Tracker) detectEvents(d *deviceState, prevIo dto.IoMap, rec dto.AvlReco
 		}
 	case 251:
 		if num(io, "251") != 0 {
-			add("warn", "idling", "Idling, mesin nyala tapi diam")
+			add("warn", "idling", "Idling, mesin menyala tetapi unit diam")
 		}
 	}
 }

@@ -116,7 +116,7 @@ func (t *Tracker) handle(ctx context.Context, raw net.Conn) {
 		return
 	}
 	if !imeiPattern.MatchString(imei) {
-		t.Log("conn", "", fmt.Sprintf(`Tolak %s: IMEI nggak valid "%s"`, remote, imei), "warn")
+		t.Log("conn", "", fmt.Sprintf(`Tolak %s: IMEI tidak valid "%s"`, remote, imei), "warn")
 		_ = c.write([]byte{0x00})
 		return
 	}
@@ -203,9 +203,9 @@ func (t *Tracker) accept(ctx context.Context, imei, remote string, c *deviceConn
 	t.broadcastDevice(d)
 	t.mu.Unlock()
 
-	t.Log("conn", imei, fmt.Sprintf("Konek dari %s, IMEI diterima (bales 01)", remote), "info")
+	t.Log("conn", imei, fmt.Sprintf("Terhubung dari %s, IMEI diterima (balas 01)", remote), "info")
 	if isNew {
-		t.Log("conn", imei, "Alat baru, ditambahin ke database", "info")
+		t.Log("conn", imei, "Alat baru, ditambahkan ke database", "info")
 	}
 	return nil
 }
@@ -242,7 +242,7 @@ func (t *Tracker) handleFrame(ctx context.Context, imei string, c *deviceConn, f
 	t.Log("raw", imei, fmt.Sprintf("<< %d byte %s", len(frame), hex.EncodeToString(frame)), "info")
 
 	if !teltonika.CRCOk(frame) {
-		t.Log("error", imei, "CRC salah, paket diabaikan (alat bakal kirim ulang)", "error")
+		t.Log("error", imei, "CRC salah, paket diabaikan (alat akan mengirim ulang)", "error")
 		return nil
 	}
 	codec := teltonika.CodecID(frame)
@@ -280,7 +280,7 @@ func (t *Tracker) handleFrame(ctx context.Context, imei string, c *deviceConn, f
 	// Store first, then ACK. If storing fails there is no ACK, so the device resends.
 	fresh, err := t.devices.SaveRecords(ctx, imei, parsed.Records)
 	if err != nil {
-		t.Log("error", imei, "Gagal nyimpen ke database: "+err.Error(), "error")
+		t.Log("error", imei, "Gagal menyimpan ke database: "+err.Error(), "error")
 		return nil
 	}
 	sort.SliceStable(fresh, func(i, j int) bool { return fresh[i].Time < fresh[j].Time })
@@ -302,7 +302,7 @@ func (t *Tracker) handleFrame(ctx context.Context, imei string, c *deviceConn, f
 		t.Log("data", imei, l, "info")
 	}
 	if dup := parsed.Count - len(fresh); dup > 0 {
-		t.Log("data", imei, fmt.Sprintf("%d record kiriman ulang dilewati (udah ada di database)", dup), "info")
+		t.Log("data", imei, fmt.Sprintf("%d record kiriman ulang dilewati (sudah ada di database)", dup), "info")
 	}
 
 	ack, err := t.sendAck(c, parsed.Count)

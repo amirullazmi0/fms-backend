@@ -8,7 +8,7 @@ import (
 )
 
 // Usual road per direction: of the latest finished ritase, the GPS trace that overlaps
-// the others the most (a medoid). Pergi = loading → unloading, pulang = unloading → loading.
+// the others the most (a medoid). Hauling = front loading → dumping, return = dumping → front loading.
 const (
 	usualMaxTrips = 25  // latest ritase compared per direction
 	usualNearM    = 50  // a point "is on" another trace within this distance
@@ -22,7 +22,7 @@ type tracedTrip struct {
 	coords [][2]float64
 }
 
-// UsualPaths builds the usual pergi & pulang roads of one route from the trucks' records.
+// UsualPaths builds the usual hauling & return roads of one route from the trucks' records.
 func UsualPaths(route dto.Route, sites []dto.Site, perTruck []TruckRecords, from, to, now int64) *dto.RouteUsualPaths {
 	siteAt := map[string][2]float64{}
 	for _, s := range sites {

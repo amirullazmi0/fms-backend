@@ -40,8 +40,8 @@ func NewDriverRepository(db *sql.DB) DriverRepository {
 	return &driverRepository{db: db}
 }
 
-// Operator / driver = user dengan user_type 'operator' (login MDT pakai NIK + PIN, bukan dashboard).
-// JSON-nya tetap dto.Driver, supaya /api/drivers dan semua tampilan lama nggak berubah.
+// Operator = user dengan user_type 'operator' (login MDT memakai NIK + PIN, bukan dashboard).
+// JSON-nya tetap dto.Driver, supaya /api/drivers dan semua tampilan lama tidak berubah.
 var driverColumns = []string{"d.id", "COALESCE(d.name, '')", "d.phone", "d.employee_no", "d.ibutton", "d.is_active", "d.note", "d.created_at", "d.updated_at",
 	"d.pin_hash IS NOT NULL"}
 

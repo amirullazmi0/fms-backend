@@ -75,7 +75,7 @@ func (u *mdtUsecase) statusChanged(imei string) {
 
 func (u *mdtUsecase) PairCode(ctx context.Context, imei, userID string) (*dto.MdtPairCode, error) {
 	if _, ok := u.unit(imei); !ok {
-		return nil, apperror.NotFound("Unit nggak ada")
+		return nil, apperror.NotFound("Unit tidak ditemukan")
 	}
 	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
 	if err != nil {
@@ -99,7 +99,7 @@ func (u *mdtUsecase) RevokeTablet(ctx context.Context, id string) error {
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("Tablet nggak ada atau udah dicabut")
+		return apperror.NotFound("Tablet tidak ditemukan atau sudah dilepas")
 	}
 	return nil
 }
@@ -114,7 +114,7 @@ func (u *mdtUsecase) SetPin(ctx context.Context, driverID string, body dto.SetPi
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("Operator nggak ada")
+		return apperror.NotFound("Operator tidak ditemukan")
 	}
 	return nil
 }
@@ -127,7 +127,7 @@ func (u *mdtUsecase) UpsertDelayCode(ctx context.Context, body dto.UpsertDelayCo
 	body.Code = strings.ToUpper(strings.TrimSpace(body.Code))
 	body.Name = strings.TrimSpace(body.Name)
 	if !delayCodePattern.MatchString(body.Code) {
-		return nil, apperror.BadRequest("Kode cuma boleh huruf besar, angka dan _ (2–20 karakter)")
+		return nil, apperror.BadRequest("Kode hanya boleh berisi huruf besar, angka, dan _ (2–20 karakter)")
 	}
 	if err := u.repo.UpsertDelayCode(ctx, body, userID); err != nil {
 		return nil, err
@@ -162,14 +162,14 @@ func (u *mdtUsecase) CurrentStatuses(ctx context.Context) ([]dto.UnitStatusLog, 
 
 func (u *mdtUsecase) SetStatus(ctx context.Context, body dto.SetUnitStatusRequest, userID string) (*dto.UnitStatusLog, error) {
 	if _, ok := u.unit(body.Imei); !ok {
-		return nil, apperror.NotFound("Unit nggak ada")
+		return nil, apperror.NotFound("Unit tidak ditemukan")
 	}
 	code, err := u.repo.DelayCode(ctx, body.DelayCode)
 	if err != nil {
 		return nil, err
 	}
 	if code == nil {
-		return nil, apperror.BadRequest("Delay code nggak dikenal")
+		return nil, apperror.BadRequest("Delay code tidak dikenal")
 	}
 	now := time.Now().UnixMilli()
 	start := body.StartAt
@@ -238,7 +238,7 @@ func (u *mdtUsecase) Login(ctx context.Context, body dto.MdtLoginRequest) (*dto.
 func (u *mdtUsecase) Bootstrap(ctx context.Context, imei, tabletID string) (*dto.MdtBootstrap, error) {
 	unit, ok := u.unit(imei)
 	if !ok {
-		return nil, apperror.NotFound("Unit nggak ada")
+		return nil, apperror.NotFound("Unit tidak ditemukan")
 	}
 	codes, err := u.repo.DelayCodes(ctx, true)
 	if err != nil {

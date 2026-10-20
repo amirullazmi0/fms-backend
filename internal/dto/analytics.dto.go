@@ -134,7 +134,7 @@ type RouteHistory struct {
 	AvgFuel       *float64            `json:"avgFuel"`
 	FuelUnit      *string             `json:"fuelUnit"`
 	Latest        *RouteHistoryLatest `json:"latest"`
-	// Paths: the road usually taken pergi & pulang (from the ritase GPS traces).
+	// Paths: the road usually taken for hauling & return (from the ritase GPS traces).
 	Paths *RouteUsualPaths `json:"paths,omitempty"`
 }
 

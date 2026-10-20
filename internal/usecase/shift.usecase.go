@@ -14,7 +14,7 @@ import (
 	"github.com/amirullazmi0/fms-backend/pkg/apperror"
 )
 
-const msgShiftClosed = "Shift udah selesai, buka lagi dulu kalau mau ngubah penugasan"
+const msgShiftClosed = "Shift sudah selesai, buka kembali shift terlebih dahulu untuk mengubah penugasan"
 
 type ShiftUsecase interface {
 	// Drivers
@@ -109,7 +109,7 @@ func (u *shiftUsecase) UpdateDriver(ctx context.Context, id string, body dto.Ups
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Operator nggak ada")
+		return nil, apperror.NotFound("Operator tidak ditemukan")
 	}
 	u.changed("")
 	return u.driverRepo.GetDriverByID(ctx, id)
@@ -133,7 +133,7 @@ func (u *shiftUsecase) DeleteDriver(ctx context.Context, id, userID string) (*dt
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Operator nggak ada")
+		return nil, apperror.NotFound("Operator tidak ditemukan")
 	}
 	u.changed("")
 	return &dto.DeleteResult{Result: result}, nil
@@ -160,7 +160,7 @@ func (u *shiftUsecase) UpdateTemplate(ctx context.Context, id string, body dto.U
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Template nggak ada")
+		return nil, apperror.NotFound("Template tidak ditemukan")
 	}
 	u.changed("")
 	return u.driverRepo.GetTemplateByID(ctx, id)
@@ -172,7 +172,7 @@ func (u *shiftUsecase) DeleteTemplate(ctx context.Context, id, userID string) er
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("Template nggak ada")
+		return apperror.NotFound("Template tidak ditemukan")
 	}
 	u.changed("")
 	return nil
@@ -204,7 +204,7 @@ func (u *shiftUsecase) mustShift(ctx context.Context, id string) (*dto.Shift, er
 		return nil, err
 	}
 	if s == nil {
-		return nil, apperror.NotFound("Shift nggak ada")
+		return nil, apperror.NotFound("Shift tidak ditemukan")
 	}
 	return s, nil
 }
@@ -300,7 +300,7 @@ func (u *shiftUsecase) UpdateShift(ctx context.Context, id string, body dto.Upda
 	if body.RouteID != nil && (cur.RouteID == nil || *body.RouteID != *cur.RouteID) {
 		// The route can only change before the shift starts (running ritase stick to their route).
 		if cur.Status != "planned" {
-			return nil, apperror.Conflict("Rute nggak bisa diganti setelah shift mulai")
+			return nil, apperror.Conflict("Rute tidak dapat diganti setelah shift dimulai")
 		}
 		n.RouteID = body.RouteID
 		routeChanged = true
@@ -326,7 +326,7 @@ func (u *shiftUsecase) DeleteShift(ctx context.Context, id, userID string) error
 		return err
 	}
 	if !ok {
-		return apperror.Conflict("Cuma shift yang belum mulai yang bisa dihapus")
+		return apperror.Conflict("Hanya shift yang belum dimulai yang dapat dihapus")
 	}
 	u.changed("")
 	return nil
@@ -338,7 +338,7 @@ func (u *shiftUsecase) StartShift(ctx context.Context, id string) (*dto.Shift, e
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.Conflict("Shift udah jalan atau udah selesai")
+		return nil, apperror.Conflict("Shift sudah berjalan atau sudah selesai")
 	}
 	u.tracker.Log("conn", "", "Shift dimulai manual", "info")
 	u.changed(id)
@@ -351,7 +351,7 @@ func (u *shiftUsecase) CloseShift(ctx context.Context, id, userID string) (*dto.
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.Conflict("Shift belum mulai atau udah selesai")
+		return nil, apperror.Conflict("Shift belum dimulai atau sudah selesai")
 	}
 	u.tracker.Log("conn", "", "Shift ditutup manual", "info")
 	u.changed(id)
@@ -383,7 +383,7 @@ func (u *shiftUsecase) check(ctx context.Context, shift *dto.Shift, a dto.Assign
 			continue
 		}
 		if x.DriverID == a.DriverID {
-			return apperror.Conflict("Operator ini udah dapat tugas di shift ini")
+			return apperror.Conflict("Operator ini sudah mendapat tugas di shift ini")
 		}
 	}
 	for _, x := range shift.Assignments {
@@ -391,7 +391,7 @@ func (u *shiftUsecase) check(ctx context.Context, shift *dto.Shift, a dto.Assign
 			continue
 		}
 		if x.Imei == a.Imei {
-			return apperror.Conflict("Unit ini udah dipakai operator lain di shift ini")
+			return apperror.Conflict("Unit ini sudah dipakai operator lain di shift ini")
 		}
 	}
 	end := shift.PlannedEnd
@@ -502,10 +502,10 @@ func (u *shiftUsecase) UpdateAssignment(ctx context.Context, id string, body dto
 		return nil, err
 	}
 	if old == nil {
-		return nil, apperror.NotFound("Penugasan nggak ada")
+		return nil, apperror.NotFound("Penugasan tidak ditemukan")
 	}
 	if old.EndAt != nil {
-		return nil, apperror.Conflict("Penugasan ini udah selesai")
+		return nil, apperror.Conflict("Penugasan ini sudah selesai")
 	}
 	shift, err := u.mustShift(ctx, old.ShiftID)
 	if err != nil {
@@ -545,7 +545,7 @@ func (u *shiftUsecase) EndAssignment(ctx context.Context, id string) (*dto.Delet
 		return nil, err
 	}
 	if st == nil {
-		return nil, apperror.NotFound("Penugasan nggak ada")
+		return nil, apperror.NotFound("Penugasan tidak ditemukan")
 	}
 	if st.Status == "closed" {
 		return nil, apperror.Conflict(msgShiftClosed)

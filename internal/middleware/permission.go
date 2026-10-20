@@ -29,7 +29,7 @@ func RequirePermission(allowed ...string) gin.HandlerFunc {
 				return
 			}
 		}
-		response.Error(c, http.StatusForbidden, "Akun lu nggak punya akses buat ini", nil)
+		response.Error(c, http.StatusForbidden, "Akun Anda tidak memiliki akses untuk aksi ini", nil)
 		c.Abort()
 	}
 }
@@ -45,7 +45,7 @@ func RequireAdministrator() gin.HandlerFunc {
 			return
 		}
 		if !actor.IsAdministrator && !actor.AdminApp {
-			response.Error(c, http.StatusForbidden, "Cuma role administrator yang boleh masuk sini", nil)
+			response.Error(c, http.StatusForbidden, "Hanya role administrator yang boleh mengakses halaman ini", nil)
 			c.Abort()
 			return
 		}

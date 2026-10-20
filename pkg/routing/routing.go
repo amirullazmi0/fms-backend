@@ -61,7 +61,7 @@ func (r *Router) TruckFactor() float64 { return r.truckFactor }
 func (r *Router) RoadRoute(ctx context.Context, from, to LatLng) (*dto.RoadRoute, error) {
 	var osrmErr error
 	if !r.enabled {
-		osrmErr = errors.New("OSRM dimatiin (ROUTING=0)")
+		osrmErr = errors.New("OSRM dinonaktifkan (ROUTING=0)")
 	} else {
 		v, err := r.osrmRoute(ctx, from, to)
 		if err == nil {
@@ -144,7 +144,7 @@ func (r *Router) fetchOSRM(ctx context.Context, from, to LatLng) (*dto.RoadRoute
 	res, err := r.client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
-			return nil, errors.New("Server routing nggak jawab (timeout)")
+			return nil, errors.New("Server routing tidak merespons (timeout)")
 		}
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (r *Router) fetchOSRM(ctx context.Context, from, to LatLng) (*dto.RoadRoute
 	_ = json.NewDecoder(res.Body).Decode(&body)
 	if res.StatusCode != http.StatusOK || body.Code != "Ok" || len(body.Routes) == 0 {
 		if body.Code == "NoRoute" {
-			return nil, errors.New("Nggak ketemu jalan yang nyambung antar dua titik ini")
+			return nil, errors.New("Tidak ditemukan jalan yang menghubungkan kedua titik ini")
 		}
 		if body.Message != "" {
 			return nil, errors.New(body.Message)

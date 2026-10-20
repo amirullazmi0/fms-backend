@@ -109,7 +109,7 @@ func (m *Manager) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		t, err := m.open(ctx)
 		if err != nil {
-			m.opt.Logf("warn", "Tunnel gagal dibuka (%v), dicoba lagi %s lagi", err, backoff)
+			m.opt.Logf("warn", "Tunnel gagal dibuka (%v), dicoba kembali dalam %s", err, backoff)
 			if !sleep(ctx, backoff) {
 				return
 			}
@@ -135,7 +135,7 @@ func (m *Manager) watch(ctx context.Context, t *active) {
 		case <-ctx.Done():
 			return
 		case <-t.done:
-			m.opt.Logf("warn", "Tunnel %s putus, bikin ulang…", t.info.Provider)
+			m.opt.Logf("warn", "Tunnel %s terputus, membuat ulang…", t.info.Provider)
 			return
 		case <-ticker.C:
 			ok, known := Probe(t.info.Host, t.info.Port, probeTimeout)
@@ -145,9 +145,9 @@ func (m *Manager) watch(ctx context.Context, t *active) {
 				fails = 0
 			default:
 				fails++
-				m.opt.Logf("warn", "Tunnel nggak nyambung (%d/%d)", fails, maxProbeFails)
+				m.opt.Logf("warn", "Tunnel tidak terhubung (%d/%d)", fails, maxProbeFails)
 				if fails >= maxProbeFails {
-					m.opt.Logf("warn", "Tunnel dibikin ulang setelah %d kali gagal dicek", fails)
+					m.opt.Logf("warn", "Tunnel dibuat ulang setelah %d kali gagal diperiksa", fails)
 					return
 				}
 			}
@@ -192,7 +192,7 @@ func (m *Manager) openNgrok(ctx context.Context) (*active, error) {
 		cancel()
 		msg := strings.SplitN(r.err.Error(), "\n", 2)[0]
 		if strings.Contains(strings.ToLower(msg), "card") || strings.Contains(msg, "8013") {
-			msg += " — ngrok minta verifikasi kartu buat alamat TCP: https://dashboard.ngrok.com/settings#id-verification"
+			msg += " — ngrok meminta verifikasi kartu untuk alamat TCP: https://dashboard.ngrok.com/settings#id-verification"
 		}
 		return nil, errors.New(msg)
 	}

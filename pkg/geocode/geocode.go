@@ -114,7 +114,7 @@ func (g *Geocoder) lookup(ctx context.Context, j job) {
 	if err != nil {
 		g.failures++
 		if g.failures == 5 && g.logf != nil {
-			g.logf("Geocode dimatiin sementara, Nominatim nggak bisa diakses (%v)", err)
+			g.logf("Geocode dinonaktifkan sementara, Nominatim tidak dapat diakses (%v)", err)
 		}
 		g.mu.Unlock()
 		return
@@ -123,7 +123,7 @@ func (g *Geocoder) lookup(ctx context.Context, j job) {
 	g.cache[j.key] = label
 	g.mu.Unlock()
 	if err := g.store.SavePlace(ctx, j.key, label); err != nil && g.logf != nil {
-		g.logf("Gagal nyimpen nama tempat: %v", err)
+		g.logf("Gagal menyimpan nama tempat: %v", err)
 	}
 }
 

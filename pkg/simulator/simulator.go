@@ -140,7 +140,7 @@ func routePath(ctx context.Context, key, name string, from, l, u latLng) (*path,
 				logf("[%s] jalur ke front loading gagal (%v), mulai dari front loading", name, a.err)
 			}
 		case <-time.After(approachWait):
-			logf("[%s] jalur ke front loading belum kehitung, mulai dari front loading", name)
+			logf("[%s] jalur ke front loading belum terhitung, mulai dari front loading", name)
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -278,10 +278,10 @@ func (d *fakeDevice) setRoute(ctx context.Context, r *routeInfo) {
 	if r == nil {
 		if simLoop {
 			d.path, d.ign = loopPath, true
-			d.logf("nggak ada rute, muter di loop bawaan")
+			d.logf("tidak ada rute, berputar di loop bawaan")
 		} else {
 			d.path, d.ign = nil, false
-			d.logf("nggak ada rute, parkir di tempat")
+			d.logf("tidak ada rute, parkir di tempat")
 		}
 		d.seg, d.frac, d.depotTicks = 0, 0, 0
 		d.mu.Unlock()
@@ -290,7 +290,7 @@ func (d *fakeDevice) setRoute(ctx context.Context, r *routeInfo) {
 	// While the path is computed the truck waits (no straight-line shortcut).
 	d.path = nil
 	if d.fails == 0 {
-		d.logf("ikut rute %q, ngitung jalur lewat jalan…", r.name)
+		d.logf("mengikuti rute %q, menghitung jalur melalui jalan…", r.name)
 	}
 	d.mu.Unlock()
 
@@ -306,7 +306,7 @@ func (d *fakeDevice) setRoute(ctx context.Context, r *routeInfo) {
 		d.fails++
 		d.retryAt = time.Now().Add(time.Duration(math.Min(300e3, 20e3*math.Pow(2, float64(d.fails-1)))) * time.Millisecond)
 		if err.Error() != d.lastError {
-			d.logf("gagal ngitung jalur (%v), parkir dulu, dicoba lagi otomatis", err)
+			d.logf("gagal menghitung jalur (%v), parkir sementara, dicoba kembali otomatis", err)
 		}
 		d.lastError = err.Error()
 		d.routeKey = ""
@@ -318,7 +318,7 @@ func (d *fakeDevice) setRoute(ctx context.Context, r *routeInfo) {
 	for i := 1; i <= p.loopFrom; i++ {
 		toLoad += distM(p.points[i-1], p.points[i])
 	}
-	d.logf("jalan ke front loading (%.1f km lewat jalan)", toLoad/1000)
+	d.logf("menuju front loading (%.1f km melalui jalan)", toLoad/1000)
 	d.seg, d.frac, d.depotTicks = 0, 0, 0
 }
 
@@ -422,7 +422,7 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 	}
 	if d.mustQueue() {
 		if !d.waiting {
-			d.logf("antre, spot lagi dipakai unit lain")
+			d.logf("antre, spot sedang dipakai unit lain")
 		}
 		d.waiting, d.speed = true, 0
 		return nil
@@ -623,7 +623,7 @@ func (d *fakeDevice) send(c net.Conn) error {
 func (d *fakeDevice) run(ctx context.Context) {
 	for ctx.Err() == nil {
 		d.session(ctx)
-		d.logf("putus, konek ulang 5 detik lagi")
+		d.logf("terputus, menyambung ulang dalam 5 detik")
 		select {
 		case <-ctx.Done():
 			return
@@ -645,7 +645,7 @@ func (d *fakeDevice) session(ctx context.Context) {
 	if _, err := c.Write(append(head, id...)); err != nil {
 		return
 	}
-	d.logf("konek ke %s:%s", host, port)
+	d.logf("terhubung ke %s:%s", host, port)
 	ack := make([]byte, 1)
 	if _, err := c.Read(ack); err != nil || ack[0] != 0x01 {
 		d.logf("ditolak server")
@@ -848,7 +848,7 @@ func Run(ctx context.Context, o Options) error {
 	if o.DB != nil {
 		go syncRoutes(ctx, o.DB, fleet)
 	} else {
-		logf("Database nggak dipasang: rute dari dashboard nggak dibaca")
+		logf("Database tidak dipasang: rute dari dashboard tidak dibaca")
 	}
 	wg.Wait()
 	return nil
@@ -871,7 +871,7 @@ func resumePositions(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 		OrderBy("r.time DESC").
 		ExecuteContext(ctx, db)
 	if err != nil {
-		logf("Posisi terakhir unit nggak kebaca (%v), mulai dari posisi bawaan", err)
+		logf("Posisi terakhir unit tidak terbaca (%v), mulai dari posisi bawaan", err)
 		return
 	}
 	defer func() { _ = rows.Close() }()

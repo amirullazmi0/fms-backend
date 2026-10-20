@@ -108,7 +108,7 @@ func (h *ShiftHandler) DeleteDriver(c *gin.Context) {
 	}
 	msg := "Operator deleted successfully"
 	if r.Result == "deactivated" {
-		msg = "Operator udah pernah bertugas, jadi dinonaktifkan (bukan dihapus)"
+		msg = "Operator sudah pernah bertugas, sehingga dinonaktifkan (bukan dihapus)"
 	}
 	response.Success(c, http.StatusOK, msg, r)
 }
@@ -320,7 +320,7 @@ func (h *ShiftHandler) CloseShift(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/shifts/{id}/reopen [post]
 func (h *ShiftHandler) ReopenShift(c *gin.Context) {
-	h.transition(c, func(id string) (*dto.Shift, error) { return h.shiftUsecase.ReopenShift(c.Request.Context(), id) }, "Shift dibuka lagi")
+	h.transition(c, func(id string) (*dto.Shift, error) { return h.shiftUsecase.ReopenShift(c.Request.Context(), id) }, "Shift dibuka kembali")
 }
 
 // ---------- Assignments ----------

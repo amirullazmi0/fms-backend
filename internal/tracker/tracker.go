@@ -28,9 +28,9 @@ const (
 )
 
 var (
-	ErrOffline       = errors.New("Alat lagi offline")
-	ErrNoReply       = errors.New("Alat nggak bales dalam 20 detik")
-	ErrDeviceUnknown = errors.New("Alat belum pernah konek")
+	ErrOffline       = errors.New("Alat sedang offline")
+	ErrNoReply       = errors.New("Alat tidak membalas dalam 20 detik")
+	ErrDeviceUnknown = errors.New("Alat belum pernah terhubung")
 )
 
 // Demo truck info for simulator devices (IMEI 35000000000000x).
@@ -502,7 +502,7 @@ func (t *Tracker) Delete(ctx context.Context, imei, userID string) (bool, error)
 	t.counts.Devices--
 	t.mu.Unlock()
 
-	t.Log("conn", imei, "Alat dihapus (data record tetap disimpan buat laporan)", "warn")
+	t.Log("conn", imei, "Alat dihapus (data record tetap disimpan untuk laporan)", "warn")
 	t.hub.Broadcast(map[string]any{"type": "removed", "imei": imei})
 	return true, nil
 }
@@ -533,7 +533,7 @@ func (t *Tracker) SendCommand(ctx context.Context, imei, cmd string) (string, er
 		return r.text, r.err
 	case <-timer.C:
 		t.dropJob(imei, job)
-		t.Log("cmd", imei, `Perintah "`+cmd+`" nggak dibales dalam 20 detik`, "warn")
+		t.Log("cmd", imei, `Perintah "`+cmd+`" tidak dibalas dalam 20 detik`, "warn")
 		return "", ErrNoReply
 	case <-ctx.Done():
 		t.dropJob(imei, job)

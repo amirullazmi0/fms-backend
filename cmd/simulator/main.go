@@ -52,10 +52,10 @@ func main() {
 		if db, err := database.NewDatabase(&cfg.Database); err == nil {
 			o.DB = db.DB
 		} else {
-			fmt.Printf("Database nggak kejangkau (%v): rute dari dashboard nggak dibaca\n", err)
+			fmt.Printf("Database tidak terjangkau (%v): rute dari dashboard tidak dibaca\n", err)
 		}
 	} else {
-		fmt.Println("Config nggak kebaca: rute dari dashboard nggak dibaca")
+		fmt.Println("Config tidak terbaca: rute dari dashboard tidak dibaca")
 	}
 	_ = simulator.Run(context.Background(), o)
 }

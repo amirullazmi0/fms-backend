@@ -43,14 +43,14 @@ func (m *Manager) ensureBore(ctx context.Context) (string, error) {
 		if p, err := exec.LookPath("bore"); err == nil {
 			return p, nil
 		}
-		return "", errors.New("bore otomatis cuma buat Windows. Install manual: https://github.com/ekzhang/bore")
+		return "", errors.New("bore otomatis hanya untuk Windows. Install manual: https://github.com/ekzhang/bore")
 	}
 	arch := "x86_64"
 	if runtime.GOARCH == "386" {
 		arch = "i686"
 	}
 	url := fmt.Sprintf("https://github.com/ekzhang/bore/releases/download/%s/bore-%s-%s-pc-windows-msvc.zip", boreVersion, boreVersion, arch)
-	m.opt.Logf("info", "Download bore %s (sekali aja)…", boreVersion)
+	m.opt.Logf("info", "Download bore %s (hanya sekali)…", boreVersion)
 
 	dctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -96,7 +96,7 @@ func (m *Manager) ensureBore(ctx context.Context) (string, error) {
 		}
 		return exe, out.Close()
 	}
-	return "", errors.New("bore.exe nggak ada di zip")
+	return "", errors.New("bore.exe tidak ada di zip")
 }
 
 // openBore runs `bore local <DEVICE_PORT> --to bore.pub` and reads the public port.
@@ -159,6 +159,6 @@ func (m *Manager) openBore(ctx context.Context) (*active, error) {
 	case <-time.After(openTimeout):
 		cancel()
 		<-done
-		return nil, errors.New("bore nggak dapet port dalam 20 detik")
+		return nil, errors.New("bore tidak mendapat port dalam 20 detik")
 	}
 }

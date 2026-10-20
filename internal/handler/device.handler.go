@@ -260,7 +260,7 @@ func (h *DeviceHandler) Place(c *gin.Context) {
 	lat, err1 := strconv.ParseFloat(c.Query("lat"), 64)
 	lng, err2 := strconv.ParseFloat(c.Query("lng"), 64)
 	if err1 != nil || err2 != nil || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
-		response.Error(c, http.StatusBadRequest, "lat/lng nggak valid", nil)
+		response.Error(c, http.StatusBadRequest, "lat/lng tidak valid", nil)
 		return
 	}
 	response.Success(c, http.StatusOK, "Place retrieved successfully", dto.PlaceResponse{Place: h.deviceUsecase.Place(lat, lng)})

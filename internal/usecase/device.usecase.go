@@ -55,7 +55,7 @@ func (u *deviceUsecase) GetDevice(_ context.Context, imei string, limit int) (*d
 	}
 	d, ok := u.tracker.Device(imei, limit)
 	if !ok {
-		return nil, apperror.NotFound("Alat belum pernah konek")
+		return nil, apperror.NotFound("Alat belum pernah terhubung")
 	}
 	return d, nil
 }
@@ -74,7 +74,7 @@ func (u *deviceUsecase) DeleteDevice(ctx context.Context, imei, userID string) e
 		return err
 	}
 	if !ok {
-		return apperror.NotFound("Alat nggak ada")
+		return apperror.NotFound("Alat tidak ditemukan")
 	}
 	return nil
 }

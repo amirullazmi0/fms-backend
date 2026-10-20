@@ -74,7 +74,7 @@ func validUUID(c *gin.Context, name string) (string, bool) {
 	if err := validator.Validate(struct {
 		ID string `validate:"uuid"`
 	}{id}); err != nil {
-		response.Error(c, http.StatusNotFound, "Data nggak ada", nil)
+		response.Error(c, http.StatusNotFound, "Data tidak ditemukan", nil)
 		return "", false
 	}
 	return id, true
@@ -85,7 +85,7 @@ func validImei(c *gin.Context) (string, bool) {
 	if err := validator.Validate(struct {
 		Imei string `validate:"len=15,numeric"`
 	}{imei}); err != nil {
-		response.Error(c, http.StatusNotFound, "Alat nggak ada", nil)
+		response.Error(c, http.StatusNotFound, "Alat tidak ditemukan", nil)
 		return "", false
 	}
 	return imei, true

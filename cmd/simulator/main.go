@@ -4,6 +4,8 @@
 //	go run ./cmd/simulator [devices=2] [host=127.0.0.1] [port=DEVICE_PORT] [intervalSeconds=3]
 //
 // SIM_LOOP=1: unassigned trucks loop around central Jakarta instead of parking.
+// SIM_BLANKSPOT=1: signal only near the loading site, data arrives late in bulk.
+// SIM_QUEUE=1: trucks queue before a busy loading / dumping spot.
 package main
 
 import (
@@ -22,7 +24,8 @@ import (
 
 func main() {
 	args := os.Args[1:]
-	o := simulator.Options{Devices: 2, Loop: os.Getenv("SIM_LOOP") == "1"}
+	o := simulator.Options{Devices: 2, Loop: os.Getenv("SIM_LOOP") == "1",
+		BlankSpot: os.Getenv("SIM_BLANKSPOT") == "1", Queue: os.Getenv("SIM_QUEUE") == "1"}
 	if len(args) > 0 {
 		if n, err := strconv.Atoi(args[0]); err == nil && n > 0 {
 			o.Devices = n

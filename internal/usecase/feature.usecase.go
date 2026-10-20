@@ -105,7 +105,7 @@ func validSimulation(raw json.RawMessage) error {
 		return apperror.BadRequest("Config simulasi nggak valid")
 	}
 	if c.Devices < 1 || c.Devices > 50 {
-		return apperror.BadRequest("Jumlah truk simulasi 1–50")
+		return apperror.BadRequest("Jumlah unit simulasi 1–50")
 	}
 	if c.Interval < 1 || c.Interval > 60 {
 		return apperror.BadRequest("Interval kirim data 1–60 detik")
@@ -179,6 +179,8 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 		Devices:     c.Devices,
 		Interval:    c.Interval,
 		Loop:        c.Loop,
+		BlankSpot:   c.BlankSpot,
+		Queue:       c.Queue,
 		Host:        "127.0.0.1",
 		Port:        u.cfg.Device.Port,
 		DataDir:     u.cfg.App.DataDir,
@@ -203,8 +205,8 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 	}()
 
 	u.setRunning(ctx, true, actor.ID)
-	logger.Info(fmt.Sprintf("Simulasi jalan: %d truk, tiap %d detik", c.Devices, c.Interval))
-	u.tracker.Notice("info", "Simulasi jalan", fmt.Sprintf("%d truk palsu konek ke server, kirim data tiap %d detik.", c.Devices, c.Interval), "")
+	logger.Info(fmt.Sprintf("Simulasi jalan: %d unit, tiap %d detik", c.Devices, c.Interval))
+	u.tracker.Notice("info", "Simulasi jalan", fmt.Sprintf("%d unit palsu konek ke server, kirim data tiap %d detik.", c.Devices, c.Interval), "")
 	u.tracker.Changed("simulation")
 	return u.status(true, c), nil
 }
@@ -232,7 +234,7 @@ func (u *featureUsecase) stop(by string) bool {
 	case <-time.After(5 * time.Second):
 	}
 	logger.Info("Simulasi dihentikan oleh " + by)
-	u.tracker.Notice("warn", "Simulasi dihentikan", "Truk simulasi putus dari server.", "")
+	u.tracker.Notice("warn", "Simulasi dihentikan", "Unit simulasi putus dari server.", "")
 	u.tracker.Changed("simulation")
 	return true
 }

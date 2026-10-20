@@ -23,6 +23,11 @@ type SimulationConfig struct {
 	Devices  int  `json:"devices"`
 	Interval int  `json:"interval"`
 	Loop     bool `json:"loop"`
+	// BlankSpot: no signal away from the loading site; records are kept on the device and
+	// sent in bulk when the truck is back in coverage (Teltonika store and forward).
+	BlankSpot bool `json:"blankSpot"`
+	// Queue: a truck waits before a loading/dumping spot another truck is using.
+	Queue bool `json:"queue"`
 	// Running is kept by the backend (not the form): the simulator was on when the server
 	// stopped, so it resumes on the next start.
 	Running bool `json:"running"`

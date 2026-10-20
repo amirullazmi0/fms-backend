@@ -43,13 +43,30 @@ var loopRoute = []latLng{
 
 // Settings of the current run (one run at a time, see Run).
 var (
-	simLoop  bool
-	interval = 3
-	host     = "127.0.0.1"
-	port     = "3101"
-	graph    *routing.RoadGraph
-	logf     = func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
+	simLoop   bool
+	blankSpot bool
+	queueMode bool
+	interval  = 3
+	host      = "127.0.0.1"
+	port      = "3101"
+	graph     *routing.RoadGraph
+	logf      = func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 )
+
+const (
+	// coverageM: with BlankSpot, there is signal only this close to the loading site (the pit
+	// office / shift assign point) and when parked (garage).
+	coverageM = 500
+	// maxBatch: records per Codec 8E packet when flushing the buffer (the count is one byte).
+	maxBatch = 50
+	// queueGapM: in queue mode, a truck waits this far before a spot another truck is using.
+	queueGapM = 60
+)
+
+// spots: loading / dumping positions in use (queue mode). key = point, value = imei.
+var spots sync.Map
+
+func spotKey(p latLng) string { return fmt.Sprintf("%.5f,%.5f", p[0], p[1]) }
 
 // path is the polyline one truck follows. After the last point it returns to loopFrom.
 type path struct {
@@ -120,10 +137,10 @@ func routePath(ctx context.Context, key, name string, from, l, u latLng) (*path,
 			if a.err == nil {
 				gol = coords(a.r)
 			} else {
-				logf("[%s] jalur ke titik loading gagal (%v), mulai dari titik loading", name, a.err)
+				logf("[%s] jalur ke front loading gagal (%v), mulai dari front loading", name, a.err)
 			}
 		case <-time.After(approachWait):
-			logf("[%s] jalur ke titik loading belum kehitung, mulai dari titik loading", name)
+			logf("[%s] jalur ke front loading belum kehitung, mulai dari front loading", name)
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -198,6 +215,9 @@ type fakeDevice struct {
 	dout1      int // DOUT1: engine cut
 	ibutton    float64
 	cargoTemp  float64 // 0.1 °C
+	buffer     []teltonika.OutRecord // blank spot: kept until back in coverage
+	spot       string                // queue mode: the spot this truck holds (key in spots)
+	waiting    bool                  // queue mode: waiting for a spot
 }
 
 func newDevice(n int) *fakeDevice {
@@ -298,12 +318,47 @@ func (d *fakeDevice) setRoute(ctx context.Context, r *routeInfo) {
 	for i := 1; i <= p.loopFrom; i++ {
 		toLoad += distM(p.points[i-1], p.points[i])
 	}
-	d.logf("jalan ke titik loading (%.1f km lewat jalan)", toLoad/1000)
+	d.logf("jalan ke front loading (%.1f km lewat jalan)", toLoad/1000)
 	d.seg, d.frac, d.depotTicks = 0, 0, 0
+}
+
+// releaseSpot frees the spot this truck holds (queue mode).
+func (d *fakeDevice) releaseSpot() {
+	if d.spot != "" {
+		spots.CompareAndDelete(d.spot, d.imei)
+		d.spot = ""
+	}
+}
+
+// mustQueue: queue mode, the next stop is a spot held by another truck and it is close.
+func (d *fakeDevice) mustQueue() bool {
+	if !queueMode || d.path == nil {
+		return false
+	}
+	next := d.next(d.seg)
+	if !d.path.depots[next] {
+		return false
+	}
+	key := spotKey(d.path.points[next])
+	if holder, ok := spots.Load(key); !ok || holder == d.imei {
+		return false
+	}
+	return distM(d.position(), d.path.points[next]) <= queueGapM
+}
+
+// covered: with BlankSpot, whether the device has signal where it is now.
+func (d *fakeDevice) covered() bool {
+	if !blankSpot || d.path == nil || d.path.unload < 0 {
+		return true
+	}
+	return distM(d.position(), d.path.points[d.path.loopFrom]) <= coverageM
 }
 
 func (d *fakeDevice) step(dt float64) *greenEvent {
 	depotTicks := int(math.Ceil(180 / float64(interval))) // ~3 minutes loading/unloading
+	if queueMode {
+		depotTicks *= 2 // longer loading so queues happen with a few trucks
+	}
 	d.tick++
 	door := 0.0
 	if d.door != 0 {
@@ -318,17 +373,21 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 		return nil
 	}
 	if d.path == nil {
+		d.releaseSpot()
 		d.ign, d.speed, d.door = false, 0, 0
 		return nil
 	}
 	if d.depotTicks > 0 {
 		// At a demo site: still, engine on, tipper open.
 		d.depotTicks--
+		if d.depotTicks == 0 {
+			d.releaseSpot()
+		}
 		if d.depotTicks == 0 && d.finish && d.seg == d.path.unload {
 			// Last unloading of a stopped shift: park here (routeKey kept, so the same route
 			// is not started again on the next sync).
 			d.here, d.path, d.ign, d.door = d.path.points[d.seg], nil, false, 0
-			d.logf("ritase terakhir selesai di unloading, parkir")
+			d.logf("ritase terakhir selesai di dumping, parkir")
 			d.speed = 0
 			return nil
 		}
@@ -361,6 +420,14 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 		d.speed = 0
 		return nil
 	}
+	if d.mustQueue() {
+		if !d.waiting {
+			d.logf("antre, spot lagi dipakai unit lain")
+		}
+		d.waiting, d.speed = true, 0
+		return nil
+	}
+	d.waiting = false
 	if rand.Float64() < 0.005 {
 		d.ign, d.parkTicks, d.speed = false, 12, 0
 		return nil
@@ -401,6 +468,12 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 			if d.path.depots[d.seg] {
 				d.depotTicks = depotTicks // stop right at the site
 				move = 0
+				if queueMode {
+					d.spot = spotKey(d.path.points[d.seg])
+					spots.Store(d.spot, d.imei)
+				}
+			} else if queueMode && d.mustQueue() {
+				move = 0 // reached the end of the queue
 			}
 		}
 	}
@@ -522,9 +595,29 @@ func (d *fakeDevice) send(c net.Conn) error {
 	}
 	rec := d.record(ev)
 	d.lastRec = &rec
+	if !d.covered() {
+		// No signal: keep it in memory like the device does, send when back in coverage.
+		if len(d.buffer) == 0 {
+			d.logf("masuk blank spot, data disimpan di alat")
+		}
+		d.buffer = append(d.buffer, rec)
+		d.mu.Unlock()
+		return nil
+	}
+	batch := append(d.buffer, rec)
+	if len(d.buffer) > 0 {
+		d.logf("masuk area sinyal, kirim %d record tertunda", len(d.buffer))
+	}
+	d.buffer = nil
 	d.mu.Unlock()
-	_, err := c.Write(teltonika.BuildAvl8E([]teltonika.OutRecord{rec}))
-	return err
+	for len(batch) > 0 {
+		n := min(len(batch), maxBatch)
+		if _, err := c.Write(teltonika.BuildAvl8E(batch[:n])); err != nil {
+			return err
+		}
+		batch = batch[n:]
+	}
+	return nil
 }
 
 func (d *fakeDevice) run(ctx context.Context) {
@@ -648,7 +741,7 @@ func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 			ExecuteContext(ctx, db)
 		if err != nil {
 			if !warned {
-				logf("Gagal baca rute dari database (%v), truk tetap di jalur sekarang", err)
+				logf("Gagal baca rute dari database (%v), unit tetap di jalur sekarang", err)
 			}
 			warned = true
 		} else {
@@ -681,6 +774,8 @@ type Options struct {
 	Port        string // device TCP port (default 3101)
 	Interval    int    // seconds between records (default 3)
 	Loop        bool   // unassigned trucks loop around central Jakarta instead of parking
+	BlankSpot   bool   // signal only near the loading site: records sent late, in bulk
+	Queue       bool   // trucks queue before a busy loading / dumping spot
 	DataDir     string // road graph cache
 	OverpassURL string
 	// DB: routes of active shift assignments are read from here every 20 s.
@@ -706,7 +801,8 @@ func Run(ctx context.Context, o Options) error {
 	}
 	defer running.Store(false)
 
-	simLoop, interval, host, port = o.Loop, 3, "127.0.0.1", "3101"
+	simLoop, blankSpot, queueMode, interval, host, port = o.Loop, o.BlankSpot, o.Queue, 3, "127.0.0.1", "3101"
+	spots.Clear()
 	if o.Interval > 0 {
 		interval = o.Interval
 	}
@@ -775,7 +871,7 @@ func resumePositions(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 		OrderBy("r.time DESC").
 		ExecuteContext(ctx, db)
 	if err != nil {
-		logf("Posisi terakhir truk nggak kebaca (%v), mulai dari posisi bawaan", err)
+		logf("Posisi terakhir unit nggak kebaca (%v), mulai dari posisi bawaan", err)
 		return
 	}
 	defer func() { _ = rows.Close() }()
@@ -804,6 +900,6 @@ func resumePositions(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 		n++
 	}
 	if n > 0 {
-		logf("%d truk lanjut dari posisi terakhirnya", n)
+		logf("%d unit lanjut dari posisi terakhirnya", n)
 	}
 }

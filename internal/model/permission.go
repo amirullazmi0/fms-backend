@@ -54,9 +54,14 @@ const (
 
 	PermissionFeatureUpdate = "feature.update"
 
-	PermissionRoadRead   = "road.read"
-	PermissionRoadDelete = "road.delete"
+	PermissionRoadRead      = "road.read"
+	PermissionRoadDelete    = "road.delete"
 	PermissionSimulationRun = "simulation.run"
+
+	PermissionTargetManage    = "target.manage"
+	PermissionDelayCodeManage = "delay_code.manage"
+	PermissionMdtManage       = "mdt.manage"
+	PermissionUnitStatusWrite = "unit_status.write"
 )
 
 // Feature keys (rows of the features table).

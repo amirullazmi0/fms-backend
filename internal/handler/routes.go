@@ -43,6 +43,8 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 	featureRepo := repository.NewFeatureRepository(db)
 	visitRepo := repository.NewVisitRepository(db)
 	roadRepo := repository.NewRoadRepository(db)
+	productionRepo := repository.NewProductionRepository(db)
+	mdtRepo := repository.NewMdtRepository(db)
 
 	// Services
 	hub := sse.NewHub()
@@ -57,7 +59,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 		return nil, fmt.Errorf("load place cache: %w", err)
 	}
 	router := routing.New(cfg.Routing.Enabled, cfg.Routing.OSRMURL, cfg.Routing.TruckFactor, routing.NewRoadGraph(cfg.Routing.OverpassURL, cfg.App.DataDir).WithStore(roadRepo))
-	shiftScheduler := scheduler.New(shiftRepo, siteRepo, tripRepo, deviceRepo, driverRepo, liveTracker).WithVisits(visitRepo)
+	shiftScheduler := scheduler.New(shiftRepo, siteRepo, tripRepo, deviceRepo, driverRepo, liveTracker).WithVisits(visitRepo).WithMdt(mdtRepo)
 
 	// Usecases & handlers
 	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, &cfg.JWT)
@@ -74,6 +76,12 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 
 	shiftUsecase := usecase.NewShiftUsecase(shiftRepo, driverRepo, tripRepo, shiftScheduler, liveTracker, &cfg.Report).WithVisits(visitRepo)
 	shiftHandler := NewShiftHandler(shiftUsecase)
+
+	productionUsecase := usecase.NewProductionUsecase(productionRepo, tripRepo, liveTracker, &cfg.Report)
+	productionHandler := NewProductionHandler(productionUsecase)
+
+	mdtUsecase := usecase.NewMdtUsecase(mdtRepo, tripRepo, liveTracker, cfg.Report.TimeZone)
+	mdtHandler := NewMdtHandler(mdtUsecase)
 
 	streamHandler := NewStreamHandler(hub)
 
@@ -185,6 +193,32 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			devices.GET("/:imei/records", can(model.PermissionDeviceRead), deviceHandler.Records)
 			devices.GET("/:imei/raw", can(model.PermissionDeviceRead), deviceHandler.RawRecords)
 			devices.POST("/:imei/command", can(model.PermissionDeviceCommand), deviceHandler.Command)
+			devices.GET("/:imei/mdt", can(model.PermissionMdtManage), mdtHandler.Tablets)
+			devices.POST("/:imei/mdt", can(model.PermissionMdtManage), mdtHandler.PairCode)
+		}
+		api.DELETE("/mdt-tablets/:id", auth, can(model.PermissionMdtManage), mdtHandler.RevokeTablet)
+
+		// Status unit & delay code (dasar PA/UA). Semua user login bisa baca daftar delay code.
+		api.GET("/delay-codes", auth, mdtHandler.DelayCodes)
+		api.PUT("/delay-codes", auth, can(model.PermissionDelayCodeManage), mdtHandler.UpsertDelayCode)
+		unitStatus := api.Group("/unit-status")
+		unitStatus.Use(auth)
+		{
+			unitStatus.GET("", can(model.PermissionDeviceRead, model.PermissionReportRead), mdtHandler.StatusLogs)
+			unitStatus.GET("/current", can(model.PermissionDeviceRead, model.PermissionReportRead), mdtHandler.CurrentStatuses)
+			unitStatus.POST("", can(model.PermissionUnitStatusWrite), mdtHandler.SetStatus)
+		}
+
+		// Aplikasi MDT di kabin (fms-mdt): pairing pakai kode, sisanya pakai token tablet.
+		mdt := api.Group("/mdt")
+		{
+			mdt.POST("/pair", middleware.RateLimit(middleware.RateLimitConfig{KeyPrefix: "mdt:pair", Limit: 10, Window: time.Minute}), mdtHandler.Pair)
+			tablet := mdt.Group("")
+			tablet.Use(middleware.MdtAuth(mdtUsecase.TabletByToken))
+			tablet.POST("/login", middleware.RateLimit(middleware.RateLimitConfig{KeyPrefix: "mdt:login", Limit: 20, Window: time.Minute}), mdtHandler.Login)
+			tablet.GET("/bootstrap", mdtHandler.Bootstrap)
+			tablet.GET("/position", mdtHandler.Position)
+			tablet.POST("/status", mdtHandler.SubmitStatuses)
 		}
 
 		monitor := api.Group("")
@@ -205,6 +239,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			sites.GET("", can(model.PermissionSiteRead), siteHandler.GetSites)
 			sites.POST("", can(model.PermissionSiteCreate), siteHandler.CreateSite)
 			sites.PUT("/:id", can(model.PermissionSiteUpdate), siteHandler.UpdateSite)
+			sites.PUT("/:id/zones", can(model.PermissionSiteUpdate), siteHandler.UpdateZones)
 			sites.DELETE("/:id", can(model.PermissionSiteDelete), siteHandler.DeleteSite)
 		}
 
@@ -226,6 +261,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			drivers.POST("", can(model.PermissionDriverCreate), shiftHandler.CreateDriver)
 			drivers.PUT("/:id", can(model.PermissionDriverUpdate), shiftHandler.UpdateDriver)
 			drivers.DELETE("/:id", can(model.PermissionDriverDelete), shiftHandler.DeleteDriver)
+			drivers.PUT("/:id/pin", can(model.PermissionMdtManage), mdtHandler.SetPin)
 		}
 
 		templates := api.Group("/shift-templates")
@@ -296,6 +332,19 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			reports.GET("/trips", shiftHandler.ReportTrips)
 			reports.GET("/visits", shiftHandler.ReportVisits)
 			reports.GET("/visits/list", shiftHandler.ReportVisitList)
+			reports.GET("/hourly", productionHandler.Hourly)
+			reports.GET("/freshness", productionHandler.Freshness)
+			reports.GET("/stages", productionHandler.Stages)
+		}
+
+		// Target produksi per rute: semua yang bisa baca laporan boleh lihat, ubah butuh target.manage.
+		targets := api.Group("/production-targets")
+		targets.Use(auth)
+		{
+			targets.GET("", can(model.PermissionReportRead, model.PermissionTargetManage), productionHandler.GetTargets)
+			targets.POST("", can(model.PermissionTargetManage), productionHandler.CreateTarget)
+			targets.PUT("/:id", can(model.PermissionTargetManage), productionHandler.UpdateTarget)
+			targets.DELETE("/:id", can(model.PermissionTargetManage), productionHandler.DeleteTarget)
 		}
 	}
 

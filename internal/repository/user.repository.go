@@ -48,16 +48,18 @@ func users() *database.QueryBuilder {
 	return database.NewQueryBuilder("users u").
 		Select(userColumns...).
 		InnerJoin("roles r", "r.id = u.role_id").
+		Where("u.user_type = 'staff'").
 		WhereNull("u.deleted_at")
 }
 
 func scanUser(row interface{ Scan(...any) error }) (*model.User, error) {
 	var u model.User
-	var name, refresh sql.NullString
+	var email, hash, name, refresh sql.NullString
 	var expiry, lastLogin sql.NullTime
-	if err := row.Scan(&u.ID, &u.Email, &name, &u.PasswordHash, &u.RoleID, &u.Role, &u.IsAdministrator, &u.RoleAdminApp, &u.IsActive, &refresh, &expiry, &lastLogin, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	if err := row.Scan(&u.ID, &email, &name, &hash, &u.RoleID, &u.Role, &u.IsAdministrator, &u.RoleAdminApp, &u.IsActive, &refresh, &expiry, &lastLogin, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		return nil, err
 	}
+	u.Email, u.PasswordHash = email.String, hash.String
 	u.Name = database.NullString(name)
 	u.RefreshToken = database.NullString(refresh)
 	if expiry.Valid {
@@ -219,6 +221,7 @@ func (r *userRepository) UpdateUser(ctx context.Context, id string, body dto.Upd
 		ub.SetRaw("updated_at", "CURRENT_TIMESTAMP")
 	}
 	res, err := ub.Where("id = $1", id).
+		Where("user_type = 'staff'").
 		Where("deleted_at IS NULL").
 		ExecuteContext(ctx, r.db)
 	return affected(res, err)
@@ -236,6 +239,7 @@ func (r *userRepository) UpdateRole(ctx context.Context, id, roleID, updatedBy s
 		ub.SetRaw("updated_at", "CURRENT_TIMESTAMP")
 	}
 	res, err := ub.Where("id = $1", id).
+		Where("user_type = 'staff'").
 		Where("deleted_at IS NULL").
 		ExecuteContext(ctx, r.db)
 	return affected(res, err)
@@ -245,13 +249,14 @@ func (r *userRepository) DeleteUser(ctx context.Context, id, deletedBy string) (
 	res, err := database.NewDeleteBuilder("users").
 		SetDeletedBy(deletedBy).
 		Where("id = $1", id).
+		Where("user_type = 'staff'").
 		Where("deleted_at IS NULL").
 		ExecuteContext(ctx, r.db)
 	return affected(res, err)
 }
 
 func (r *userRepository) CountUsers(ctx context.Context) (int, error) {
-	return count(ctx, r.db, database.NewQueryBuilder("users").WhereNull("deleted_at"))
+	return count(ctx, r.db, database.NewQueryBuilder("users").Where("user_type = 'staff'").WhereNull("deleted_at"))
 }
 
 // nullIfEmpty trims s and maps "" to NULL.

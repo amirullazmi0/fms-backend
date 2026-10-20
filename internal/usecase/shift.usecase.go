@@ -90,7 +90,7 @@ func (u *shiftUsecase) LastAssignments(ctx context.Context) (map[string]dto.Driv
 
 func (u *shiftUsecase) CreateDriver(ctx context.Context, body dto.UpsertDriverRequest, userID string) (*dto.Driver, error) {
 	if strings.TrimSpace(body.Name) == "" {
-		return nil, apperror.BadRequest("Nama driver wajib diisi")
+		return nil, apperror.BadRequest("Nama operator wajib diisi")
 	}
 	id, err := u.driverRepo.CreateDriver(ctx, body, userID)
 	if err != nil {
@@ -102,14 +102,14 @@ func (u *shiftUsecase) CreateDriver(ctx context.Context, body dto.UpsertDriverRe
 
 func (u *shiftUsecase) UpdateDriver(ctx context.Context, id string, body dto.UpsertDriverRequest, userID string) (*dto.Driver, error) {
 	if strings.TrimSpace(body.Name) == "" {
-		return nil, apperror.BadRequest("Nama driver wajib diisi")
+		return nil, apperror.BadRequest("Nama operator wajib diisi")
 	}
 	ok, err := u.driverRepo.UpdateDriver(ctx, id, body, userID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Driver nggak ada")
+		return nil, apperror.NotFound("Operator nggak ada")
 	}
 	u.changed("")
 	return u.driverRepo.GetDriverByID(ctx, id)
@@ -133,7 +133,7 @@ func (u *shiftUsecase) DeleteDriver(ctx context.Context, id, userID string) (*dt
 		return nil, err
 	}
 	if !ok {
-		return nil, apperror.NotFound("Driver nggak ada")
+		return nil, apperror.NotFound("Operator nggak ada")
 	}
 	u.changed("")
 	return &dto.DeleteResult{Result: result}, nil
@@ -383,7 +383,7 @@ func (u *shiftUsecase) check(ctx context.Context, shift *dto.Shift, a dto.Assign
 			continue
 		}
 		if x.DriverID == a.DriverID {
-			return apperror.Conflict("Driver ini udah dapat tugas di shift ini")
+			return apperror.Conflict("Operator ini udah dapat tugas di shift ini")
 		}
 	}
 	for _, x := range shift.Assignments {
@@ -391,7 +391,7 @@ func (u *shiftUsecase) check(ctx context.Context, shift *dto.Shift, a dto.Assign
 			continue
 		}
 		if x.Imei == a.Imei {
-			return apperror.Conflict("Truk ini udah dipakai driver lain di shift ini")
+			return apperror.Conflict("Unit ini udah dipakai operator lain di shift ini")
 		}
 	}
 	end := shift.PlannedEnd

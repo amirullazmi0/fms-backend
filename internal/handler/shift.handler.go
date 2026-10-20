@@ -63,10 +63,10 @@ func (h *ShiftHandler) CreateDriver(c *gin.Context) {
 	}
 	d, err := h.shiftUsecase.CreateDriver(c.Request.Context(), body, c.GetString("user_id"))
 	if err != nil {
-		respondError(c, err, "Failed to create driver")
+		respondError(c, err, "Failed to create operator")
 		return
 	}
-	response.Success(c, http.StatusCreated, "Driver created successfully", d)
+	response.Success(c, http.StatusCreated, "Operator created successfully", d)
 }
 
 // UpdateDriver godoc
@@ -85,10 +85,10 @@ func (h *ShiftHandler) UpdateDriver(c *gin.Context) {
 	}
 	d, err := h.shiftUsecase.UpdateDriver(c.Request.Context(), id, body, c.GetString("user_id"))
 	if err != nil {
-		respondError(c, err, "Failed to update driver")
+		respondError(c, err, "Failed to update operator")
 		return
 	}
-	response.Success(c, http.StatusOK, "Driver updated successfully", d)
+	response.Success(c, http.StatusOK, "Operator updated successfully", d)
 }
 
 // DeleteDriver godoc
@@ -103,12 +103,12 @@ func (h *ShiftHandler) DeleteDriver(c *gin.Context) {
 	}
 	r, err := h.shiftUsecase.DeleteDriver(c.Request.Context(), id, c.GetString("user_id"))
 	if err != nil {
-		respondError(c, err, "Failed to delete driver")
+		respondError(c, err, "Failed to delete operator")
 		return
 	}
-	msg := "Driver deleted successfully"
+	msg := "Operator deleted successfully"
 	if r.Result == "deactivated" {
-		msg = "Driver udah pernah bertugas, jadi dinonaktifkan (bukan dihapus)"
+		msg = "Operator udah pernah bertugas, jadi dinonaktifkan (bukan dihapus)"
 	}
 	response.Success(c, http.StatusOK, msg, r)
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/amirullazmi0/fms-backend/pkg/database"
 )
 
-// DriverRepository covers drivers and shift templates (the shift master data).
+// DriverRepository covers operators (users with user_type operator) and shift templates (the shift master data).
 type DriverRepository interface {
 	GetDrivers(ctx context.Context, q *dto.QueryGlobal) ([]dto.Driver, int, error)
 	GetDriverByID(ctx context.Context, id string) (*dto.Driver, error)
@@ -40,13 +40,26 @@ func NewDriverRepository(db *sql.DB) DriverRepository {
 	return &driverRepository{db: db}
 }
 
-var driverColumns = []string{"d.id", "d.name", "d.phone", "d.employee_no", "d.ibutton", "d.active", "d.note", "d.created_at", "d.updated_at"}
+// Operator / driver = user dengan user_type 'operator' (login MDT pakai NIK + PIN, bukan dashboard).
+// JSON-nya tetap dto.Driver, supaya /api/drivers dan semua tampilan lama nggak berubah.
+var driverColumns = []string{"d.id", "COALESCE(d.name, '')", "d.phone", "d.employee_no", "d.ibutton", "d.is_active", "d.note", "d.created_at", "d.updated_at",
+	"d.pin_hash IS NOT NULL"}
+
+// operators: users tipe operator yang belum dihapus.
+func operators() *database.QueryBuilder {
+	return database.NewQueryBuilder("users d").Select(driverColumns...).
+		Where("d.user_type = 'operator'").
+		WhereNull("d.deleted_at")
+}
+
+// operatorRole: role OPERATOR (dari migrasi), dipakai sebagai role_id operator baru.
+const operatorRole = "(SELECT id FROM roles WHERE name = 'OPERATOR' AND deleted_at IS NULL LIMIT 1)"
 
 func scanDriver(row interface{ Scan(...any) error }) (dto.Driver, error) {
 	var d dto.Driver
 	var phone, emp, ib, note sql.NullString
 	var created, updated time.Time
-	if err := row.Scan(&d.ID, &d.Name, &phone, &emp, &ib, &d.Active, &note, &created, &updated); err != nil {
+	if err := row.Scan(&d.ID, &d.Name, &phone, &emp, &ib, &d.Active, &note, &created, &updated, &d.HasPin); err != nil {
 		return d, err
 	}
 	d.Phone, d.EmployeeNo, d.Ibutton, d.Note = database.NullString(phone), database.NullString(emp), database.NullString(ib), database.NullString(note)
@@ -55,7 +68,7 @@ func scanDriver(row interface{ Scan(...any) error }) (dto.Driver, error) {
 }
 
 func (r *driverRepository) GetDrivers(ctx context.Context, q *dto.QueryGlobal) ([]dto.Driver, int, error) {
-	qb := database.NewQueryBuilder("drivers d").Select(driverColumns...).WhereNull("d.deleted_at")
+	qb := operators()
 
 	n := 0
 	next := func() int { n++; return n }
@@ -69,7 +82,7 @@ func (r *driverRepository) GetDrivers(ctx context.Context, q *dto.QueryGlobal) (
 		return nil, 0, err
 	}
 	if q.SortBy == "" {
-		qb.OrderBy("d.active DESC").OrderBy("d.name")
+		qb.OrderBy("d.is_active DESC").OrderBy("d.name")
 		if q.Paginated() {
 			limit, offset := database.GetPagination(q.Page, q.Limit)
 			qb.Limit(limit).Offset(offset)
@@ -95,10 +108,7 @@ func (r *driverRepository) GetDrivers(ctx context.Context, q *dto.QueryGlobal) (
 }
 
 func (r *driverRepository) GetDriverByID(ctx context.Context, id string) (*dto.Driver, error) {
-	query, args := database.NewQueryBuilder("drivers d").Select(driverColumns...).
-		Where("d.id = $1", id).
-		WhereNull("d.deleted_at").
-		Build()
+	query, args := operators().Where("d.id = $1", id).Build()
 	d, err := scanDriver(database.RawQueryRowContext(ctx, r.db, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -118,19 +128,21 @@ func ibuttonOf(s *string) *string {
 	return &up
 }
 
-// enabledOf: a missing flag means true (active driver, auto-close template).
+// enabledOf: a missing flag means true (active operator, auto-close template).
 func enabledOf(b *bool) bool {
 	return b == nil || *b
 }
 
 func (r *driverRepository) CreateDriver(ctx context.Context, body dto.UpsertDriverRequest, createdBy string) (string, error) {
 	var id string
-	err := database.NewInsertBuilder("drivers").
+	err := database.NewInsertBuilder("users").
+		Set("user_type", "operator").
+		SetRaw("role_id", operatorRole).
 		Set("name", strings.TrimSpace(body.Name)).
 		Set("phone", noteOf(body.Phone)).
 		Set("employee_no", noteOf(body.EmployeeNo)).
 		Set("ibutton", ibuttonOf(body.Ibutton)).
-		Set("active", enabledOf(body.Active)).
+		Set("is_active", enabledOf(body.Active)).
 		Set("note", noteOf(body.Note)).
 		SetCreatedBy(createdBy).
 		QueryRowContext(ctx, r.db).Scan(&id)
@@ -138,15 +150,16 @@ func (r *driverRepository) CreateDriver(ctx context.Context, body dto.UpsertDriv
 }
 
 func (r *driverRepository) UpdateDriver(ctx context.Context, id string, body dto.UpsertDriverRequest, updatedBy string) (bool, error) {
-	res, err := database.NewUpdateBuilder("drivers").
+	res, err := database.NewUpdateBuilder("users").
 		Set("name", strings.TrimSpace(body.Name)).
 		Set("phone", noteOf(body.Phone)).
 		Set("employee_no", noteOf(body.EmployeeNo)).
 		Set("ibutton", ibuttonOf(body.Ibutton)).
-		Set("active", enabledOf(body.Active)).
+		Set("is_active", enabledOf(body.Active)).
 		Set("note", noteOf(body.Note)).
 		SetUpdatedBy(updatedBy).
 		Where("id = $1", id).
+		Where("user_type = 'operator'").
 		Where("deleted_at IS NULL").
 		ExecuteContext(ctx, r.db)
 	return affected(res, err)
@@ -158,19 +171,21 @@ func (r *driverRepository) DriverEverAssigned(ctx context.Context, id string) (b
 }
 
 func (r *driverRepository) DeactivateDriver(ctx context.Context, id, updatedBy string) (bool, error) {
-	res, err := database.NewUpdateBuilder("drivers").
-		Set("active", false).
+	res, err := database.NewUpdateBuilder("users").
+		Set("is_active", false).
 		SetUpdatedBy(updatedBy).
 		Where("id = $1", id).
+		Where("user_type = 'operator'").
 		Where("deleted_at IS NULL").
 		ExecuteContext(ctx, r.db)
 	return affected(res, err)
 }
 
 func (r *driverRepository) DeleteDriver(ctx context.Context, id, deletedBy string) (bool, error) {
-	res, err := database.NewDeleteBuilder("drivers").
+	res, err := database.NewDeleteBuilder("users").
 		SetDeletedBy(deletedBy).
 		Where("id = $1", id).
+		Where("user_type = 'operator'").
 		Where("deleted_at IS NULL").
 		ExecuteContext(ctx, r.db)
 	return affected(res, err)

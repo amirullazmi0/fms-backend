@@ -8,6 +8,7 @@ type Driver struct {
 	Ibutton    *string `json:"ibutton"` // iButton ID (hex)
 	Active     bool    `json:"active"`
 	Note       *string `json:"note"`
+	HasPin     bool    `json:"hasPin"` // can log in to the MDT
 	CreatedAt  int64   `json:"createdAt"`
 	UpdatedAt  int64   `json:"updatedAt"`
 }

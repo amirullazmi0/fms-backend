@@ -19,6 +19,8 @@ type AvlHead struct {
 	Speed    int     `json:"speed"`
 	EventIo  int     `json:"eventIo"`
 	Valid    bool    `json:"valid"`
+	// ReceivedAt: when the server stored it (Time is the GPS time). 0 = not read from the database.
+	ReceivedAt int64 `json:"receivedAt,omitempty"`
 }
 
 type AvlRecord struct {
@@ -50,6 +52,8 @@ type Device struct {
 	Name        *string          `json:"name"`
 	Plate       *string          `json:"plate"`
 	Vehicle     *string          `json:"vehicle"`
+	PayloadTon  float64          `json:"payloadTon"` // truck factor: ton per rit
+	UnitType    string           `json:"unitType"`   // DT | EX | LV | SUPPORT
 	Online      bool             `json:"online"`
 	Remote      *string          `json:"remote"`
 	ConnectedAt *int64           `json:"connectedAt"`
@@ -71,6 +75,9 @@ type UpdateDeviceRequest struct {
 	Name    *string `json:"name" validate:"omitempty,max=60"`
 	Plate   *string `json:"plate" validate:"omitempty,max=60"`
 	Vehicle *string `json:"vehicle" validate:"omitempty,max=60"`
+	// PayloadTon: truck factor (ton per rit).
+	PayloadTon *float64 `json:"payloadTon" validate:"omitempty,gt=0,lte=500"`
+	UnitType   *string  `json:"unitType" validate:"omitempty,oneof=DT EX LV SUPPORT"`
 }
 
 type CommandRequest struct {
@@ -134,6 +141,9 @@ type DeviceMeta struct {
 	Name    *string
 	Plate   *string
 	Vehicle *string
+	// nil = keep the stored value
+	PayloadTon *float64
+	UnitType   *string
 }
 
 // DeviceRow is a devices table row plus its record count.
@@ -142,6 +152,8 @@ type DeviceRow struct {
 	Name            *string
 	Plate           *string
 	Vehicle         *string
+	PayloadTon      float64
+	UnitType        string
 	FirstSeen       int64
 	LastSeen        *int64
 	LastConnectedAt *int64

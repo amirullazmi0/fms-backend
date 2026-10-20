@@ -35,10 +35,10 @@ var (
 
 // Demo truck info for simulator devices (IMEI 35000000000000x).
 var demoTrucks = []dto.DeviceMeta{
-	{Name: strp("Truk Simulasi 0"), Plate: strp("B 9010 SIM"), Vehicle: strp("Hino Ranger FM 260")},
-	{Name: strp("Truk Simulasi 1"), Plate: strp("B 9121 SIM"), Vehicle: strp("Mitsubishi Fuso Fighter")},
-	{Name: strp("Truk Simulasi 2"), Plate: strp("B 9232 SIM"), Vehicle: strp("Isuzu Giga FVR")},
-	{Name: strp("Truk Simulasi 3"), Plate: strp("D 9343 SIM"), Vehicle: strp("Hino Dutro 130 HD")},
+	{Name: strp("Unit Simulasi 0"), Plate: strp("B 9010 SIM"), Vehicle: strp("Hino Ranger FM 260")},
+	{Name: strp("Unit Simulasi 1"), Plate: strp("B 9121 SIM"), Vehicle: strp("Mitsubishi Fuso Fighter")},
+	{Name: strp("Unit Simulasi 2"), Plate: strp("B 9232 SIM"), Vehicle: strp("Isuzu Giga FVR")},
+	{Name: strp("Unit Simulasi 3"), Plate: strp("D 9343 SIM"), Vehicle: strp("Hino Dutro 130 HD")},
 }
 
 func strp(s string) *string { return &s }
@@ -77,6 +77,7 @@ type Tracker struct {
 	logSeq  int64
 	counts  dto.DBCounts
 	tunnel  *dto.TunnelInfo
+	onLate  func(imei string, from, to int64)
 }
 
 func New(cfg *config.Config, devices repository.DeviceRepository, events repository.EventRepository, hub *sse.Hub) *Tracker {
@@ -139,6 +140,7 @@ func (t *Tracker) Load(ctx context.Context) error {
 	for _, row := range rows {
 		d := t.getDevice(row.Imei)
 		d.Name, d.Plate, d.Vehicle = row.Name, row.Plate, row.Vehicle
+		d.PayloadTon, d.UnitType = row.PayloadTon, row.UnitType
 		d.FirstSeen = i64p(row.FirstSeen)
 		d.LastSeen = row.LastSeen
 		d.ConnectedAt = row.LastConnectedAt
@@ -157,7 +159,7 @@ func (t *Tracker) Load(ctx context.Context) error {
 func (t *Tracker) getDevice(imei string) *deviceState {
 	d, ok := t.state[imei]
 	if !ok {
-		d = &deviceState{Device: dto.Device{Imei: imei, Io: dto.IoMap{}, IoTime: map[string]int64{}}}
+		d = &deviceState{Device: dto.Device{Imei: imei, PayloadTon: DefaultPayloadTon, UnitType: "DT", Io: dto.IoMap{}, IoTime: map[string]int64{}}}
 		t.state[imei] = d
 		t.order = append(t.order, imei)
 	}
@@ -202,7 +204,8 @@ func (t *Tracker) ingest(imei string, rec dto.AvlRecord, live bool) {
 	if live {
 		d.Records++
 	}
-	if d.Last == nil || rec.Time >= d.Last.Time {
+	newest := d.Last == nil || rec.Time >= d.Last.Time
+	if newest {
 		head := rec.AvlHead
 		d.Last = &head
 		for id, v := range rec.Io {
@@ -225,7 +228,11 @@ func (t *Tracker) ingest(imei string, rec dto.AvlRecord, live bool) {
 	d.history = h
 
 	if live {
-		t.detectEvents(d, prevIo, rec)
+		// A late (store-and-forward) record is older than the current state: comparing its IO
+		// with the newer state would raise false ignition / DIN events.
+		if newest {
+			t.detectEvents(d, prevIo, rec)
+		}
 		t.hub.Broadcast(map[string]any{"type": "point", "imei": imei, "point": point})
 		t.broadcastDevice(d)
 	}
@@ -363,7 +370,8 @@ func (t *Tracker) UpdateMeta(ctx context.Context, imei string, req dto.UpdateDev
 		}
 		return &s
 	}
-	meta := dto.DeviceMeta{Name: clean(req.Name, d.Name), Plate: clean(req.Plate, d.Plate), Vehicle: clean(req.Vehicle, d.Vehicle)}
+	meta := dto.DeviceMeta{Name: clean(req.Name, d.Name), Plate: clean(req.Plate, d.Plate), Vehicle: clean(req.Vehicle, d.Vehicle),
+		PayloadTon: req.PayloadTon, UnitType: req.UnitType}
 	t.mu.Unlock()
 
 	isNew, err := t.devices.EnsureDevice(ctx, imei)
@@ -382,8 +390,81 @@ func (t *Tracker) UpdateMeta(ctx context.Context, imei string, req dto.UpdateDev
 		t.counts.Devices++
 	}
 	d.Name, d.Plate, d.Vehicle = meta.Name, meta.Plate, meta.Vehicle
+	if meta.PayloadTon != nil {
+		d.PayloadTon = *meta.PayloadTon
+	}
+	if meta.UnitType != nil {
+		d.UnitType = *meta.UnitType
+	}
 	t.broadcastDevice(d)
 	return summary(d), nil
+}
+
+// DefaultPayloadTon: truck factor for a unit not set yet (same as the column default).
+const DefaultPayloadTon = 20.0
+
+// PayloadTon is the unit's truck factor (ton per rit).
+func (t *Tracker) PayloadTon(imei string) float64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if d, ok := t.state[imei]; ok && d.PayloadTon > 0 {
+		return d.PayloadTon
+	}
+	return DefaultPayloadTon
+}
+
+// UnitLabel is the name shown for a unit: plate, else name, else IMEI.
+func UnitLabel(d dto.Device) string {
+	switch {
+	case d.Plate != nil && *d.Plate != "":
+		return *d.Plate
+	case d.Name != nil && *d.Name != "":
+		return *d.Name
+	}
+	return d.Imei
+}
+
+// UnitInfo: display label and newest GPS time (nil = no data yet) of a unit.
+func (t *Tracker) UnitInfo(imei string) (label string, lastGps *int64, lastSeen *int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	d, ok := t.state[imei]
+	if !ok {
+		return imei, nil, nil
+	}
+	if d.Last != nil {
+		lastGps = i64p(d.Last.Time)
+	}
+	return UnitLabel(d.Device), lastGps, d.LastSeen
+}
+
+// Snapshot: the unit's last valid GPS position and its speed then (ok false = no position yet).
+func (t *Tracker) Snapshot(imei string) (pos dto.DevicePos, speed int, ok bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	d, found := t.state[imei]
+	if !found || d.Pos == nil {
+		return dto.DevicePos{}, 0, false
+	}
+	if d.Last != nil && d.Last.Time == d.Pos.Time {
+		speed = d.Last.Speed
+	}
+	return *d.Pos, speed, true
+}
+
+// Alert stores and streams a fleet event raised outside the device stream (e.g. a queue alert).
+func (t *Tracker) Alert(imei, level, kind, text string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pushEvent(dto.FleetEvent{Time: time.Now().UnixMilli(), Imei: imei, Level: level, Kind: kind, Text: text})
+}
+
+// OnLate registers fn, called (outside the lock) with the GPS time range of records
+// that arrived late (store-and-forward after a blank spot).
+func (t *Tracker) OnLate(fn func(imei string, from, to int64)) {
+	t.mu.Lock()
+	t.onLate = fn
+	t.mu.Unlock()
 }
 
 // Delete soft-deletes a device, drops its connection and in-memory state.

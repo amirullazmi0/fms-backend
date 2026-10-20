@@ -100,7 +100,7 @@ func (t *Tracker) detectEvents(d *deviceState, prevIo dto.IoMap, rec dto.AvlReco
 		}
 	}
 	if v, ok := io["78"]; ok && v != prevIo["78"] && num(io, "78") != 0 {
-		add("info", "ibutton", "Supir tap iButton "+ibuttonHex(v))
+		add("info", "ibutton", "Operator tap iButton "+ibuttonHex(v))
 	}
 
 	switch rec.EventIo {
@@ -126,7 +126,7 @@ func (t *Tracker) detectEvents(d *deviceState, prevIo dto.IoMap, rec dto.AvlReco
 		}
 	case 246:
 		if num(io, "246") != 0 {
-			add("crit", "towing", "Kendaraan diderek")
+			add("crit", "towing", "Unit diderek")
 		}
 	case 252:
 		if num(io, "252") != 0 {

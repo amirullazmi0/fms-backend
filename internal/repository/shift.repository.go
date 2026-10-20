@@ -22,6 +22,9 @@ type ShiftRepository interface {
 	RecentlyClosedShifts(ctx context.Context, withinMs int64) ([]dto.Shift, error)
 	// FinishingShifts: closed shifts with a truck still on its last ritase to unloading.
 	FinishingShifts(ctx context.Context) ([]dto.Shift, error)
+	// ShiftsTouching: started shifts where imei was assigned during [from, to] (GPS time),
+	// including the late-arrival window after the shift/assignment ended.
+	ShiftsTouching(ctx context.Context, imei string, from, to, lateMs int64) ([]dto.Shift, error)
 	// PreviousShift: the latest earlier shift on the same route that has assignments.
 	PreviousShift(ctx context.Context, id string) (*dto.Shift, error)
 	CreateShift(ctx context.Context, s dto.ShiftInput, createdBy string) (string, error)
@@ -187,6 +190,15 @@ func (r *shiftRepository) FinishingShifts(ctx context.Context) ([]dto.Shift, err
 		Where("s.closed_at > now() - interval '6 hours'").
 		Where(`EXISTS (SELECT 1 FROM assignments a JOIN shifts sh ON sh.id = a.shift_id
 			WHERE a.shift_id = s.id AND a.end_at IS NULL AND `+FinishingTrip+`)`))
+}
+
+func (r *shiftRepository) ShiftsTouching(ctx context.Context, imei string, from, to, lateMs int64) ([]dto.Shift, error) {
+	return r.queryShifts(ctx, shifts().
+		Where("s.started_at IS NOT NULL").
+		Where(`EXISTS (SELECT 1 FROM assignments a WHERE a.shift_id = s.id AND a.imei = $1
+			AND COALESCE(a.start_at, s.started_at) <= $2
+			AND COALESCE(LEAST(a.end_at, s.closed_at), a.end_at, s.closed_at, now()) + make_interval(secs => $3) >= $4)`,
+			imei, database.FromMs(to), float64(lateMs)/1000, database.FromMs(from)))
 }
 
 func (r *shiftRepository) PreviousShift(ctx context.Context, id string) (*dto.Shift, error) {
@@ -367,9 +379,9 @@ func (r *shiftRepository) ClashOtherShift(ctx context.Context, shiftID, driverID
 	if err != nil {
 		return "", err
 	}
-	who := "Truk"
+	who := "Unit"
 	if sameDriver {
-		who = "Driver"
+		who = "Operator"
 	}
 	on := ""
 	if route.Valid {

@@ -24,6 +24,9 @@ var imeiPattern = regexp.MustCompile(`^\d{15}$`)
 // idleTimeout drops a silent connection; the device reconnects and resends un-ACKed data.
 const idleTimeout = 30 * time.Minute
 
+// lateAfterMs: a record older than this when stored was buffered on the device (no signal).
+const lateAfterMs = 2 * 60_000
+
 type deviceConn struct {
 	conn    net.Conn
 	writeMu sync.Mutex
@@ -288,7 +291,13 @@ func (t *Tracker) handleFrame(ctx context.Context, imei string, c *deviceConn, f
 		t.ingest(imei, rec, true)
 		lines = append(lines, describeRecord(rec, parsed.Codec))
 	}
+	onLate := t.onLate
 	t.mu.Unlock()
+	// Records from a blank spot arrive in bulk, long after their GPS time: the ritase of the
+	// shift they belong to must be counted again (any shift, however old).
+	if onLate != nil && len(fresh) > 0 && fresh[0].Time < time.Now().UnixMilli()-lateAfterMs {
+		onLate(imei, fresh[0].Time, fresh[len(fresh)-1].Time)
+	}
 	for _, l := range lines {
 		t.Log("data", imei, l, "info")
 	}

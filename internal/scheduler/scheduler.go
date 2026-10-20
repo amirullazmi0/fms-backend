@@ -49,6 +49,78 @@ type Scheduler struct {
 	lastRecompute int64
 	lastFinishing int64
 	recomputeMu   sync.Mutex // one recompute at a time (tick vs. API triggers)
+
+	lateMu sync.Mutex
+	late   map[string]lateRange // imei → GPS time range of late records not recomputed yet
+
+	mdt          repository.MdtRepository // optional: operator status for the queue alert
+	queueMu      sync.Mutex
+	queueSince   map[string]int64 // site|imei → first seen queuing by GPS
+	queueAlerted map[string]int64 // site → last alert
+}
+
+type lateRange struct{ from, to int64 }
+
+// lateDebounce: late records come in many packets; wait until the burst is over.
+const lateDebounce = 30 * time.Second
+
+// EnqueueLate marks records of imei in [from, to] as arrived late. The shifts they belong
+// to are recomputed shortly after, whatever their age (not only active / just closed).
+func (s *Scheduler) EnqueueLate(imei string, from, to int64) {
+	s.lateMu.Lock()
+	defer s.lateMu.Unlock()
+	if s.late == nil {
+		s.late = map[string]lateRange{}
+	}
+	r, ok := s.late[imei]
+	if !ok {
+		r = lateRange{from, to}
+	}
+	r.from, r.to = min(r.from, from), max(r.to, to)
+	s.late[imei] = r
+}
+
+// flushLate recomputes the shifts touched by late records.
+func (s *Scheduler) flushLate(ctx context.Context) {
+	s.lateMu.Lock()
+	pending := s.late
+	s.late = nil
+	s.lateMu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	seen := map[string]bool{}
+	list := []dto.Shift{}
+	for imei, r := range pending {
+		shifts, err := s.shifts.ShiftsTouching(ctx, imei, r.from, r.to, lateArrivalMs)
+		if err != nil {
+			s.log("Gagal cari shift buat data telat: " + err.Error())
+			continue
+		}
+		for _, sh := range shifts {
+			if !seen[sh.ID] {
+				seen[sh.ID] = true
+				list = append(list, sh)
+			}
+		}
+		s.log(fmt.Sprintf("Data telat %s (%s s/d %s) → hitung ulang %d shift", imei,
+			time.UnixMilli(r.from).Format("02/01 15:04"), time.UnixMilli(r.to).Format("02/01 15:04"), len(shifts)))
+	}
+	s.Recompute(ctx, list)
+}
+
+// runLate flushes late records every lateDebounce until ctx is done.
+func (s *Scheduler) runLate(ctx context.Context) {
+	t := time.NewTicker(lateDebounce)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.flushLate(ctx)
+		}
+	}
 }
 
 func New(shifts repository.ShiftRepository, sites repository.SiteRepository, trips repository.TripRepository,
@@ -110,6 +182,7 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 		byID[x.ID] = x
 	}
 
+	payload := s.tracker.PayloadTon(a.Imei)
 	out := []dto.TripUpsert{}
 	for _, t := range rep.Trips {
 		if t.Start < start || t.Start >= end {
@@ -148,6 +221,9 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 		if t.Status == "done" {
 			u.Status = "done"
 		}
+		if t.Leg == "go" {
+			u.PayloadTon = &payload
+		}
 		out = append(out, u)
 	}
 	changed, err := s.trips.ReplaceTrips(ctx, a.ID, out)
@@ -171,6 +247,10 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 func visitsOf(records []dto.AvlRecord, shift dto.Shift, a dto.Assignment, route dto.Route, sites []dto.Site, start, end int64, lastArrival *int64) []dto.SiteVisitUpsert {
 	out := []dto.SiteVisitUpsert{}
 	closed := shift.ClosedAt != nil || a.EndAt != nil
+	byID := map[string]dto.Site{}
+	for _, x := range sites {
+		byID[x.ID] = x
+	}
 	for _, v := range analytics.FindVisits(records, sites) {
 		finalStop := lastArrival != nil && v.Arrive == *lastArrival
 		if v.DwellMs <= 0 || (v.Arrive >= end && !finalStop) || (v.Depart != nil && *v.Depart <= start) {
@@ -185,11 +265,13 @@ func visitsOf(records []dto.AvlRecord, shift dto.Shift, a dto.Assignment, route 
 		if v.SiteID == route.LoadingID {
 			role = "loading"
 		}
+		st := analytics.SplitVisit(records, byID[v.SiteID], v)
 		out = append(out, dto.SiteVisitUpsert{
 			AssignmentID: a.ID, ShiftID: shift.ID, DriverID: a.DriverID, Imei: a.Imei, RouteID: route.ID,
 			SiteID: v.SiteID, SiteName: v.Name, Role: role, ArriveAt: v.Arrive, DepartAt: v.Depart, DwellMs: v.DwellMs,
 			// Still there when the shift is over: the truck is done ("Selesai"), not waiting.
 			Finished: closed && v.Depart == nil,
+			QueueMs:  st.QueueMs, SpotMs: st.SpotMs, WorkMs: st.WorkMs,
 		})
 	}
 	return out
@@ -294,6 +376,8 @@ func (s *Scheduler) tick(ctx context.Context) {
 			}
 		}
 	}
+	s.checkQueues(ctx, now)
+
 	// Safety net: a stay can only be "inside" while its shift runs.
 	if s.visits != nil {
 		if n, err := s.visits.CloseStale(ctx); err == nil && n > 0 {
@@ -317,6 +401,8 @@ func (s *Scheduler) Run(ctx context.Context) {
 	if err := s.drivers.SeedTemplates(ctx); err != nil {
 		logger.Warn("Gagal bikin template shift awal", zap.Error(err))
 	}
+	s.tracker.OnLate(s.EnqueueLate)
+	go s.runLate(ctx)
 	t := time.NewTicker(tickEvery)
 	defer t.Stop()
 	for {

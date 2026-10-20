@@ -11,11 +11,27 @@ datasource db {
 
 // ---------- Auth ----------
 
+enum UserType {
+  staff
+  operator
+
+  @@map("user_type")
+}
+
+/// staff = login dashboard (email + password). operator = driver / operator alat, login MDT (NIK + PIN),
+/// nggak punya email / password. Check users_staff_login & index unik NIK operator ada di migrasi.
 model User {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email           String    @unique
+  email           String?   @unique
   name            String?
-  passwordHash    String    @map("password_hash") // bcrypt (hash scrypt lama dari demo masih dikenali, diganti bcrypt pas login)
+  passwordHash    String?   @map("password_hash") // bcrypt (hash scrypt lama dari demo masih dikenali, diganti bcrypt pas login)
+  userType        UserType  @default(staff) @map("user_type")
+  employeeNo      String?   @map("employee_no") // NIK (operator)
+  phone           String?
+  ibutton         String?
+  /// PIN login MDT (bcrypt), operator saja.
+  pinHash         String?   @map("pin_hash")
+  note            String?
   roleId          String    @map("role_id") @db.Uuid
   /// Superuser: lolos semua cek role & permission, boleh masuk fms-administrator.
   isAdministrator Boolean   @default(false) @map("is_administrator")
@@ -33,8 +49,14 @@ model User {
   sessions        Session[]
   shiftsCreated   Shift[]   @relation("ShiftCreatedBy")
   shiftsClosed    Shift[]   @relation("ShiftClosedBy")
+  // sebagai operator
+  assignments     Assignment[]
+  trips           Trip[]
+  siteVisits      SiteVisit[]
+  unitStatusLogs  UnitStatusLog[]
 
   @@index([roleId], map: "idx_user_role")
+  @@index([userType], map: "users_user_type")
   @@map("users")
 }
 
@@ -105,6 +127,16 @@ model Session {
 
 // ---------- Tracking ----------
 
+/// Jenis unit: DT (dump truck), EX (excavator), LV (light vehicle), SUPPORT (grader, dozer, water/fuel truck).
+enum UnitType {
+  DT
+  EX
+  LV
+  SUPPORT
+
+  @@map("unit_type")
+}
+
 /// Satu baris per alat, primary key IMEI. Alat baru otomatis ketambah waktu pertama konek.
 model Device {
   imei            String       @id
@@ -115,6 +147,9 @@ model Device {
   lastSeen        DateTime?    @map("last_seen") @db.Timestamptz(3)
   lastConnectedAt DateTime?    @map("last_connected_at") @db.Timestamptz(3)
   lastRemote      String?      @map("last_remote")
+  /// Muatan per rit (truck factor, ton). Tonase = ritase × payload_ton.
+  payloadTon      Float        @default(20) @map("payload_ton")
+  unitType        UnitType     @default(DT) @map("unit_type")
   updatedAt       DateTime     @default(now()) @map("updated_at") @db.Timestamptz(3)
   deletedAt       DateTime?    @map("deleted_at") @db.Timestamptz(3)
   createdBy       String?      @map("created_by") @db.Uuid
@@ -126,7 +161,9 @@ model Device {
   assignments     Assignment[]
   trips           Trip[]
 
-  siteVisits SiteVisit[]
+  siteVisits     SiteVisit[]
+  unitStatusLogs UnitStatusLog[]
+  mdtTablets     MdtTablet[]
 
   @@map("devices")
 }
@@ -192,22 +229,26 @@ model Place {
 
 // Master titik (geofence). Peran loading/unloading ditentuin di rute; satu titik bisa dipakai banyak rute.
 model Site {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name            String
-  lat             Float
-  lng             Float
-  radiusM         Int       @default(10) @map("radius_m")
-  note            String?
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
-  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(3)
-  createdBy       String?   @map("created_by") @db.Uuid
-  updatedBy       String?   @map("updated_by") @db.Uuid
-  deletedBy       String?   @map("deleted_by") @db.Uuid
-  loadingRoutes   Route[]   @relation("RouteLoading")
-  unloadingRoutes Route[]   @relation("RouteUnloading")
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  lat              Float
+  lng              Float
+  radiusM          Int       @default(10) @map("radius_m")
+  /// Alert antrean: >= queueAlertTrucks unit antre lebih dari queueAlertMin menit.
+  queueAlertTrucks Int       @default(3) @map("queue_alert_trucks")
+  queueAlertMin    Int       @default(15) @map("queue_alert_min")
+  note             String?
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdBy        String?   @map("created_by") @db.Uuid
+  updatedBy        String?   @map("updated_by") @db.Uuid
+  deletedBy        String?   @map("deleted_by") @db.Uuid
+  loadingRoutes    Route[]   @relation("RouteLoading")
+  unloadingRoutes  Route[]   @relation("RouteUnloading")
 
   siteVisits SiteVisit[]
+  zones      SiteZone[]
 
   @@map("sites")
 }
@@ -232,6 +273,7 @@ model Route {
   trips           Trip[]
 
   siteVisits SiteVisit[]
+  targets    ProductionTarget[]
 
   @@index([loadingSiteId], map: "routes_loading_site_id")
   @@index([unloadingSiteId], map: "routes_unloading_site_id")
@@ -268,27 +310,6 @@ enum TripLeg {
   @@map("trip_leg")
 }
 
-model Driver {
-  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String
-  phone       String?
-  employeeNo  String?      @map("employee_no")
-  ibutton     String?
-  active      Boolean      @default(true)
-  note        String?
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime     @default(now()) @map("updated_at") @db.Timestamptz(3)
-  deletedAt   DateTime?    @map("deleted_at") @db.Timestamptz(3)
-  createdBy   String?      @map("created_by") @db.Uuid
-  updatedBy   String?      @map("updated_by") @db.Uuid
-  deletedBy   String?      @map("deleted_by") @db.Uuid
-  assignments Assignment[]
-  trips       Trip[]
-
-  siteVisits SiteVisit[]
-
-  @@map("drivers")
-}
 
 model ShiftTemplate {
   id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -355,12 +376,13 @@ model Assignment {
   endAt     DateTime? @map("end_at") @db.Timestamptz(3) // null = masih berlaku
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   shift     Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  driver    Driver    @relation(fields: [driverId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  driver    User      @relation(fields: [driverId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   device    Device    @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
   route     Route     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   trips     Trip[]
 
-  siteVisits SiteVisit[]
+  siteVisits     SiteVisit[]
+  unitStatusLogs UnitStatusLog[]
 
   @@index([shiftId], map: "assignments_shift_id")
   @@map("assignments")
@@ -394,12 +416,14 @@ model Trip {
   fuelUsed        Float?      @map("fuel_used")
   loadDwellMs     BigInt      @map("load_dwell_ms")
   unloadDwellMs   BigInt?     @map("unload_dwell_ms")
+  /// Snapshot devices.payload_ton saat dihitung.
+  payloadTon      Float?      @map("payload_ton")
   status          TripStatus
   leg             TripLeg     @default(go)
   computedAt      DateTime    @default(now()) @map("computed_at") @db.Timestamptz(3)
   assignment      Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   shift           Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  driver          Driver?     @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  driver          User?       @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   device          Device      @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
   route           Route?      @relation(fields: [routeId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
@@ -460,12 +484,16 @@ model SiteVisit {
   arriveAt     DateTime        @map("arrive_at") @db.Timestamptz(3)
   departAt     DateTime?       @map("depart_at") @db.Timestamptz(3)
   dwellMs      BigInt          @map("dwell_ms")
+  /// Pecahan dwell: antre (zona queue / diam sebelum inti), spot (zona spot), sisanya di radius inti.
+  queueMs      BigInt?         @map("queue_ms")
+  spotMs       BigInt?         @map("spot_ms")
+  workMs       BigInt?         @map("work_ms")
   status       SiteVisitStatus
   computedAt   DateTime        @default(now()) @map("computed_at") @db.Timestamptz(3)
   createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   assignment   Assignment?     @relation(fields: [assignmentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   shift        Shift?          @relation(fields: [shiftId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  driver       Driver?         @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  driver       User?           @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   device       Device          @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
   route        Route?          @relation(fields: [routeId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   site         Site            @relation(fields: [siteId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -475,6 +503,148 @@ model SiteVisit {
   @@index([shiftId], map: "site_visits_shift_id")
   @@index([assignmentId], map: "site_visits_assignment_id")
   @@map("site_visits")
+}
+
+// ---------- Zona antre / spot ----------
+
+enum SiteZoneKind {
+  queue
+  spot
+
+  @@map("site_zone_kind")
+}
+
+/// Sub-geofence lingkaran di dalam/sekitar titik: zona antre dan zona spot (posisi muat/bongkar).
+model SiteZone {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId    String       @map("site_id") @db.Uuid
+  kind      SiteZoneKind
+  lat       Float
+  lng       Float
+  radiusM   Int          @default(20) @map("radius_m")
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime     @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  createdBy String?      @map("created_by") @db.Uuid
+  updatedBy String?      @map("updated_by") @db.Uuid
+  deletedBy String?      @map("deleted_by") @db.Uuid
+  site      Site         @relation(fields: [siteId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([siteId], map: "site_zones_site_id")
+  @@map("site_zones")
+}
+
+// ---------- Target produksi ----------
+
+/// Target per rute, berlaku mulai validFrom sampai ada target baru.
+model ProductionTarget {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  routeId     String    @map("route_id") @db.Uuid
+  ritPerHour  Float?    @map("rit_per_hour")
+  tonPerHour  Float?    @map("ton_per_hour")
+  ritPerShift Float?    @map("rit_per_shift")
+  tonPerShift Float?    @map("ton_per_shift")
+  validFrom   DateTime  @default(dbgenerated("CURRENT_DATE")) @map("valid_from") @db.Date
+  note        String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+  deletedBy   String?   @map("deleted_by") @db.Uuid
+  route       Route     @relation(fields: [routeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([routeId, validFrom], map: "production_targets_route_valid")
+  @@map("production_targets")
+}
+
+// ---------- Status unit & MDT ----------
+
+enum UnitStatus {
+  working
+  standby
+  breakdown
+
+  @@map("unit_status")
+}
+
+enum DelayCategory {
+  working
+  standby_planned
+  standby_unplanned
+  breakdown
+
+  @@map("delay_category")
+}
+
+enum UnitStatusSource {
+  auto
+  supervisor
+  dmr
+  mdt
+
+  @@map("unit_status_source")
+}
+
+/// Master delay code (P2H, Ishoma, Sholat, Antre, BD, ...).
+model DelayCode {
+  code      String          @id @db.VarChar(20)
+  name      String          @db.VarChar(100)
+  category  DelayCategory
+  icon      String?         @db.VarChar(40)
+  sort      Int             @default(0)
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime        @default(now()) @map("updated_at") @db.Timestamptz(3)
+  createdBy String?         @map("created_by") @db.Uuid
+  updatedBy String?         @map("updated_by") @db.Uuid
+  logs      UnitStatusLog[]
+
+  @@map("delay_codes")
+}
+
+/// Log status unit. endAt null = status yang sedang berlaku. id dari MDT (uuid) biar kiriman ulang nggak dobel.
+model UnitStatusLog {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  imei         String
+  driverId     String?          @map("driver_id") @db.Uuid
+  assignmentId String?          @map("assignment_id") @db.Uuid
+  status       UnitStatus
+  delayCode    String?          @map("delay_code") @db.VarChar(20)
+  startAt      DateTime         @map("start_at") @db.Timestamptz(3)
+  endAt        DateTime?        @map("end_at") @db.Timestamptz(3)
+  source       UnitStatusSource
+  note         String?
+  clientAt     DateTime?        @map("client_at") @db.Timestamptz(3)
+  receivedAt   DateTime         @default(now()) @map("received_at") @db.Timestamptz(3)
+  createdBy    String?          @map("created_by") @db.Uuid
+  device       Device           @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+  driver       User?            @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assignment   Assignment?      @relation(fields: [assignmentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  delay        DelayCode?       @relation(fields: [delayCode], references: [code], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([imei, startAt], map: "unit_status_logs_imei_start")
+  @@index([startAt], map: "unit_status_logs_start_at")
+  @@map("unit_status_logs")
+}
+
+/// Tablet MDT di kabin, dipasangkan ke satu unit lewat kode pairing.
+model MdtTablet {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  imei            String
+  name            String?   @db.VarChar(100)
+  tokenHash       String?   @unique(map: "mdt_tablets_token_hash_key") @map("token_hash") @db.VarChar(64)
+  pairCodeHash    String?   @map("pair_code_hash") @db.VarChar(64)
+  pairCodeExpires DateTime? @map("pair_code_expires") @db.Timestamptz(3)
+  pairedAt        DateTime? @map("paired_at") @db.Timestamptz(3)
+  lastSyncAt      DateTime? @map("last_sync_at") @db.Timestamptz(3)
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy       String?   @map("created_by") @db.Uuid
+  device          Device    @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([imei], map: "mdt_tablets_imei")
+  @@map("mdt_tablets")
 }
 
 // ---------- Data jalan ----------
@@ -513,4 +683,25 @@ model RoadArea {
   fetchedAt    DateTime @default(now()) @map("fetched_at") @db.Timestamptz(3)
 
   @@map("road_areas")
+}
+
+/// Cadangan tabel drivers sebelum operator dilebur ke users (20261020000000_operators_as_users).
+/// Nggak dipakai kode; dihapus di migrasi berikutnya setelah dicek.
+model DriverLegacy {
+  id         String    @id(map: "drivers_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  phone      String?
+  employeeNo String?   @map("employee_no")
+  ibutton    String?
+  pinHash    String?   @map("pin_hash")
+  active     Boolean   @default(true)
+  note       String?
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdBy  String?   @map("created_by") @db.Uuid
+  updatedBy  String?   @map("updated_by") @db.Uuid
+  deletedBy  String?   @map("deleted_by") @db.Uuid
+
+  @@map("drivers_legacy")
 }

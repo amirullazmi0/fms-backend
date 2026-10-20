@@ -62,6 +62,7 @@ const (
 	PermissionDelayCodeManage = "delay_code.manage"
 	PermissionMdtManage       = "mdt.manage"
 	PermissionUnitStatusWrite = "unit_status.write"
+	PermissionDispatchManage  = "dispatch.manage"
 )
 
 // Feature keys (rows of the features table).

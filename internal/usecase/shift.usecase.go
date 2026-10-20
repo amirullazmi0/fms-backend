@@ -45,6 +45,8 @@ type ShiftUsecase interface {
 	CopyPrevious(ctx context.Context, shiftID string) (*dto.CopyPreviousResponse, error)
 	UpdateAssignment(ctx context.Context, id string, body dto.AssignmentRequest) (*dto.Assignment, error)
 	EndAssignment(ctx context.Context, id string) (*dto.DeleteResult, error)
+	// MoveUnit: pindahkan unit ke shift berjalan di rute lain (panel dispatcher).
+	MoveUnit(ctx context.Context, imei, toRouteID string) (*dto.Assignment, error)
 
 	// Reports
 	Report(ctx context.Context, q dto.ReportQuery) (*dto.Report, error)
@@ -656,4 +658,51 @@ func (u *shiftUsecase) checkBreaks(ctx context.Context, breaks []dto.ShiftBreak)
 		return apperror.BadRequest("Delay code istirahat tidak dikenal: " + strings.Join(unknown, ", "))
 	}
 	return nil
+}
+
+// MoveUnit (panel dispatcher): the unit leaves its fleet and joins the running shift of another
+// route, with the same operator, from now. Ritase so far stay with the old fleet.
+func (u *shiftUsecase) MoveUnit(ctx context.Context, imei, toRouteID string) (*dto.Assignment, error) {
+	active, err := u.shiftRepo.ActiveShifts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var from, to *dto.Shift
+	var old dto.Assignment
+	for i := range active {
+		s := &active[i]
+		for _, a := range s.Assignments {
+			if a.Imei == imei && a.EndAt == nil {
+				from, old = s, a
+			}
+		}
+		if s.RouteID != nil && *s.RouteID == toRouteID && to == nil {
+			to = s
+		}
+	}
+	switch {
+	case from == nil:
+		return nil, apperror.Conflict("Unit ini tidak sedang bertugas di shift berjalan")
+	case to == nil:
+		return nil, apperror.Conflict("Belum ada shift berjalan di fleet tujuan. Buat atau mulai shift-nya terlebih dahulu.")
+	case old.RouteID == toRouteID:
+		return nil, apperror.Conflict("Unit sudah di fleet ini")
+	}
+	for _, a := range to.Assignments {
+		if a.EndAt == nil && (a.Imei == imei || a.DriverID == old.DriverID) {
+			return nil, apperror.Conflict("Unit atau operatornya sudah bertugas di shift tujuan")
+		}
+	}
+	if _, err := u.EndAssignment(ctx, old.ID); err != nil {
+		return nil, err
+	}
+	now := time.Now().UnixMilli()
+	note := "Dipindah dari shift " + from.Name + " (panel dispatcher)"
+	a, err := u.shiftRepo.InsertAssignment(ctx, to.ID, old.DriverID, imei, toRouteID, &note, &now)
+	if err != nil {
+		return nil, err
+	}
+	u.tracker.Log("conn", imei, "Unit dipindah ke shift "+to.Name+" (panel dispatcher)", "info")
+	u.changed("")
+	return a, nil
 }

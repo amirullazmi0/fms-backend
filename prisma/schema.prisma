@@ -162,6 +162,7 @@ model Device {
   deletedBy       String?      @map("deleted_by") @db.Uuid
   records         Record[]
   installs        DeviceInstall[]
+  fleetLoaders    FleetLoader[]
   events          Event[]
   commands        Command[]
   assignments     Assignment[]
@@ -278,6 +279,7 @@ model Route {
   shifts          Shift[]
   trips           Trip[]
 
+  loaders    FleetLoader[]
   siteVisits SiteVisit[]
   targets    ProductionTarget[]
 
@@ -729,4 +731,21 @@ model DeviceInstall {
 
   @@index([imei, installedAt], map: "device_installs_imei")
   @@map("device_installs")
+}
+
+/// Fleet = rute + excavator. Satu baris = satu periode excavator di rute; endAt null = masih bertugas.
+model FleetLoader {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  routeId         String    @map("route_id") @db.Uuid
+  imei            String
+  /// Produktivitas excavator (ton/jam).
+  productivityTph Float?    @map("productivity_tph")
+  startAt         DateTime  @default(now()) @map("start_at") @db.Timestamptz(3)
+  endAt           DateTime? @map("end_at") @db.Timestamptz(3)
+  createdBy       String?   @map("created_by") @db.Uuid
+  route           Route     @relation(fields: [routeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  device          Device    @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([routeId, startAt], map: "fleet_loaders_route")
+  @@map("fleet_loaders")
 }

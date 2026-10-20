@@ -83,6 +83,9 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 	mdtUsecase := usecase.NewMdtUsecase(mdtRepo, tripRepo, liveTracker, cfg.Report.TimeZone)
 	mdtHandler := NewMdtHandler(mdtUsecase)
 
+	dispatchUsecase := usecase.NewDispatchUsecase(repository.NewDispatchRepository(db), siteRepo, productionRepo, mdtRepo, liveTracker)
+	dispatchHandler := NewDispatchHandler(dispatchUsecase, shiftUsecase)
+
 	streamHandler := NewStreamHandler(hub)
 
 	featureUsecase := usecase.NewFeatureUsecase(ctx, featureRepo, db, cfg, liveTracker, roadRepo)
@@ -324,6 +327,14 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			simulation.GET("", featureHandler.GetSimulation)
 			simulation.POST("/start", featureHandler.StartSimulation)
 			simulation.POST("/stop", featureHandler.StopSimulation)
+		}
+
+		dispatch := api.Group("/dispatch")
+		dispatch.Use(auth)
+		{
+			dispatch.GET("/fleets", can(model.PermissionShiftRead, model.PermissionReportRead), dispatchHandler.Board)
+			dispatch.PUT("/fleets/:id/loader", can(model.PermissionDispatchManage), dispatchHandler.SetLoader)
+			dispatch.POST("/move", can(model.PermissionDispatchManage), dispatchHandler.Move)
 		}
 
 		reports := api.Group("/reports")

@@ -1,9 +1,9 @@
-// Skema database FMS (dipakai Prisma cuma buat migrasi; backend Go query langsung lewat lib/pq).
+// Skema database FMS (Prisma hanya dipakai untuk migrasi; backend Go melakukan query langsung melalui lib/pq).
 // Asal: fmctest/prisma/schema.prisma, ditambah konvensi kratify:
 //   - users: refresh token, is_active, soft delete + audit
 //   - tabel master (devices, sites, routes, drivers, shift_templates, shifts): deleted_at + created_by/updated_by/deleted_by
 //   - role & permission (pola presiden-solusi): roles, permissions, role_permissions, users.role_id
-// Tabel log/time-series (records, events, commands, places, assignments, trips) nggak pakai soft delete.
+// Tabel log/time-series (records, events, commands, places, assignments, trips) tidak memakai soft delete.
 
 datasource db {
   provider = "postgresql"
@@ -19,12 +19,12 @@ enum UserType {
 }
 
 /// staff = login dashboard (email + password). operator = driver / operator alat, login MDT (NIK + PIN),
-/// nggak punya email / password. Check users_staff_login & index unik NIK operator ada di migrasi.
+/// tidak memiliki email / password. Check users_staff_login & index unik NIK operator ada di migrasi.
 model User {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email           String?   @unique
   name            String?
-  passwordHash    String?   @map("password_hash") // bcrypt (hash scrypt lama dari demo masih dikenali, diganti bcrypt pas login)
+  passwordHash    String?   @map("password_hash") // bcrypt (hash scrypt lama dari demo masih dikenali, diganti bcrypt saat login)
   userType        UserType  @default(staff) @map("user_type")
   employeeNo      String?   @map("employee_no") // NIK (operator)
   phone           String?
@@ -60,8 +60,8 @@ model User {
   @@map("users")
 }
 
-/// Role yang bisa diatur dari dashboard. Satu role boleh is_default (dipakai kalau user dibikin tanpa role);
-/// index unik parsial idx_roles_single_default ada di migrasi (Prisma nggak bisa nulis index parsial).
+/// Role yang bisa diatur dari dashboard. Satu role boleh is_default (dipakai bila user dibuat tanpa role);
+/// index unik parsial idx_roles_single_default ada di migrasi (Prisma tidak dapat menulis index parsial).
 model Role {
   id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name            String           @unique @db.VarChar(100)
@@ -137,7 +137,7 @@ enum UnitType {
   @@map("unit_type")
 }
 
-/// Satu baris per alat, primary key IMEI. Alat baru otomatis ketambah waktu pertama konek.
+/// Satu baris per alat, primary key IMEI. Alat baru otomatis ditambahkan saat pertama kali terhubung.
 model Device {
   imei            String       @id
   name            String?
@@ -218,7 +218,7 @@ model Command {
   @@map("commands")
 }
 
-/// Cache nama jalan dari OpenStreetMap (key = "lat,lng" dibuletin 4 desimal).
+/// Cache nama jalan dari OpenStreetMap (key = "lat,lng" dibulatkan 4 desimal).
 model Place {
   key       String   @id
   label     String?
@@ -227,7 +227,7 @@ model Place {
   @@map("places")
 }
 
-// Master titik (geofence). Peran loading/unloading ditentuin di rute; satu titik bisa dipakai banyak rute.
+// Master titik (geofence). Peran front loading / dumping ditentukan di rute; satu titik bisa dipakai banyak rute.
 model Site {
   id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name             String
@@ -253,7 +253,7 @@ model Site {
   @@map("sites")
 }
 
-// Rute = 1 titik loading + 1 titik unloading. Driver & truk masuk lewat penugasan shift.
+// Rute = 1 front loading + 1 dumping. Operator & unit masuk melalui penugasan shift.
 model Route {
   id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name            String
@@ -302,7 +302,7 @@ enum TripStatus {
   @@map("trip_status")
 }
 
-// go = berangkat (loading → unloading), back = pulang (unloading → loading)
+// go = hauling (front loading → dumping), back = return (dumping → front loading)
 enum TripLeg {
   go
   back
@@ -363,8 +363,8 @@ model Shift {
   @@map("shifts")
 }
 
-// Penugasan satu shift: driver bawa truk di rute tertentu, berlaku start_at..end_at.
-// Pindah rute / ganti truk di tengah shift = penugasan lama ditutup, yang baru dibuka.
+// Penugasan satu shift: operator membawa unit di rute tertentu, berlaku start_at..end_at.
+// Pindah rute / ganti unit di tengah shift = penugasan lama ditutup, yang baru dibuka.
 model Assignment {
   id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   shiftId   String    @map("shift_id") @db.Uuid
@@ -388,7 +388,7 @@ model Assignment {
   @@map("assignments")
 }
 
-// Ritase tersimpan (dasar laporan). Nama rute & titik disalin biar laporan lama nggak berubah.
+// Ritase tersimpan (dasar laporan). Nama rute & titik disalin agar laporan lama tidak berubah.
 model Trip {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   assignmentId    String?     @map("assignment_id") @db.Uuid
@@ -470,7 +470,7 @@ enum SiteVisitStatus {
   @@map("site_visit_status")
 }
 
-/// Satu kali truk ada di radius titik loading/unloading rutenya. departAt null = masih di dalam.
+/// Satu kali unit berada di radius front loading / dumping rutenya. departAt null = masih di dalam.
 model SiteVisit {
   id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   assignmentId String?         @map("assignment_id") @db.Uuid
@@ -603,7 +603,7 @@ model DelayCode {
   @@map("delay_codes")
 }
 
-/// Log status unit. endAt null = status yang sedang berlaku. id dari MDT (uuid) biar kiriman ulang nggak dobel.
+/// Log status unit. endAt null = status yang sedang berlaku. id dari MDT (uuid) agar kiriman ulang tidak tercatat ganda.
 model UnitStatusLog {
   id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   imei         String
@@ -649,7 +649,7 @@ model MdtTablet {
 
 // ---------- Data jalan ----------
 
-/// Jalur jalan yang udah dihitung (from → to). coords = [[lat, lng], ...].
+/// Jalur jalan yang sudah dihitung (from → to). coords = [[lat, lng], ...].
 model RoadPath {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   key        String   @unique @db.VarChar(32)
@@ -686,7 +686,7 @@ model RoadArea {
 }
 
 /// Cadangan tabel drivers sebelum operator dilebur ke users (20261020000000_operators_as_users).
-/// Nggak dipakai kode; dihapus di migrasi berikutnya setelah dicek.
+/// Tidak dipakai kode; dihapus di migrasi berikutnya setelah diperiksa.
 model DriverLegacy {
   id         String    @id(map: "drivers_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name       String

@@ -13,6 +13,9 @@ import (
 
 // DeviceRepository covers devices and their AVL records.
 type DeviceRepository interface {
+	// RecordInstall / Installs: riwayat pemasangan tracker ke unit (P2-4).
+	RecordInstall(ctx context.Context, imei, plate string, name *string, by string) error
+	Installs(ctx context.Context, imei string) ([]dto.DeviceInstall, error)
 	ListDevices(ctx context.Context) ([]dto.DeviceRow, error)
 	// EnsureDevice registers a device (or restores a soft-deleted one). True if it is new.
 	EnsureDevice(ctx context.Context, imei string) (bool, error)
@@ -40,7 +43,7 @@ func NewDeviceRepository(db *sql.DB) DeviceRepository {
 
 func (r *deviceRepository) ListDevices(ctx context.Context) ([]dto.DeviceRow, error) {
 	rows, err := database.NewQueryBuilder("devices d").
-		Select("d.imei", "d.name", "d.plate", "d.vehicle", "d.payload_ton", "d.unit_type::text", "d.first_seen", "d.last_seen", "d.last_connected_at", "d.last_remote",
+		Select("d.imei", "d.name", "d.plate", "d.vehicle", "d.payload_ton", "d.unit_type::text", "d.brand", "d.model", "d.tracker_model", "d.bucket_m3", "d.first_seen", "d.last_seen", "d.last_connected_at", "d.last_remote",
 			"(SELECT COUNT(*) FROM records r WHERE r.imei = d.imei)::int AS records").
 		WhereNull("d.deleted_at").
 		OrderBy("d.first_seen").
@@ -55,9 +58,12 @@ func (r *deviceRepository) ListDevices(ctx context.Context) ([]dto.DeviceRow, er
 		var name, plate, vehicle, remote sql.NullString
 		var first time.Time
 		var last, conn sql.NullTime
-		if err := rows.Scan(&d.Imei, &name, &plate, &vehicle, &d.PayloadTon, &d.UnitType, &first, &last, &conn, &remote, &d.Records); err != nil {
+		var brand, mdl, tracker sql.NullString
+		var bucket sql.NullFloat64
+		if err := rows.Scan(&d.Imei, &name, &plate, &vehicle, &d.PayloadTon, &d.UnitType, &brand, &mdl, &tracker, &bucket, &first, &last, &conn, &remote, &d.Records); err != nil {
 			return nil, err
 		}
+		d.Brand, d.Model, d.TrackerModel, d.BucketM3 = database.NullString(brand), database.NullString(mdl), database.NullString(tracker), database.NullFloat(bucket)
 		d.Name, d.Plate, d.Vehicle, d.LastRemote = database.NullString(name), database.NullString(plate), database.NullString(vehicle), database.NullString(remote)
 		d.FirstSeen = database.Ms(first)
 		d.LastSeen = database.NullMs(last)
@@ -115,6 +121,18 @@ func (r *deviceRepository) SetDeviceMeta(ctx context.Context, imei string, m dto
 	}
 	if m.UnitType != nil {
 		ub.Set("unit_type", *m.UnitType)
+	}
+	for col, v := range map[string]*string{"brand": m.Brand, "model": m.Model, "tracker_model": m.TrackerModel} {
+		if v != nil {
+			ub.Set(col, nullIfBlank(*v))
+		}
+	}
+	if m.BucketM3 != nil {
+		if *m.BucketM3 > 0 {
+			ub.Set("bucket_m3", *m.BucketM3)
+		} else {
+			ub.SetRaw("bucket_m3", "NULL")
+		}
 	}
 	if updatedBy != "" {
 		ub.SetUpdatedBy(updatedBy)

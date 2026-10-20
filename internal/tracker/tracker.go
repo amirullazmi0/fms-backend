@@ -141,6 +141,7 @@ func (t *Tracker) Load(ctx context.Context) error {
 		d := t.getDevice(row.Imei)
 		d.Name, d.Plate, d.Vehicle = row.Name, row.Plate, row.Vehicle
 		d.PayloadTon, d.UnitType = row.PayloadTon, row.UnitType
+		d.Brand, d.Model, d.TrackerModel, d.BucketM3 = row.Brand, row.Model, row.TrackerModel, row.BucketM3
 		d.FirstSeen = i64p(row.FirstSeen)
 		d.LastSeen = row.LastSeen
 		d.ConnectedAt = row.LastConnectedAt
@@ -371,7 +372,9 @@ func (t *Tracker) UpdateMeta(ctx context.Context, imei string, req dto.UpdateDev
 		return &s
 	}
 	meta := dto.DeviceMeta{Name: clean(req.Name, d.Name), Plate: clean(req.Plate, d.Plate), Vehicle: clean(req.Vehicle, d.Vehicle),
-		PayloadTon: req.PayloadTon, UnitType: req.UnitType}
+		PayloadTon: req.PayloadTon, UnitType: req.UnitType,
+		Brand: req.Brand, Model: req.Model, TrackerModel: req.TrackerModel, BucketM3: req.BucketM3}
+	oldPlate := d.Plate
 	t.mu.Unlock()
 
 	isNew, err := t.devices.EnsureDevice(ctx, imei)
@@ -380,6 +383,12 @@ func (t *Tracker) UpdateMeta(ctx context.Context, imei string, req dto.UpdateDev
 	}
 	if err := t.devices.SetDeviceMeta(ctx, imei, meta, userID); err != nil {
 		return dto.Device{}, err
+	}
+	// Plat berubah = tracker dipasang di unit lain (P2-4): catat riwayat pemasangan.
+	if meta.Plate != nil && (oldPlate == nil || *oldPlate != *meta.Plate) {
+		if err := t.devices.RecordInstall(ctx, imei, *meta.Plate, meta.Name, userID); err != nil {
+			return dto.Device{}, err
+		}
 	}
 
 	t.mu.Lock()
@@ -395,6 +404,22 @@ func (t *Tracker) UpdateMeta(ctx context.Context, imei string, req dto.UpdateDev
 	}
 	if meta.UnitType != nil {
 		d.UnitType = *meta.UnitType
+	}
+	strOf := func(v *string, old *string) *string {
+		if v == nil {
+			return old
+		}
+		if s := strings.TrimSpace(*v); s != "" {
+			return &s
+		}
+		return nil
+	}
+	d.Brand, d.Model, d.TrackerModel = strOf(meta.Brand, d.Brand), strOf(meta.Model, d.Model), strOf(meta.TrackerModel, d.TrackerModel)
+	if meta.BucketM3 != nil {
+		d.BucketM3 = nil
+		if *meta.BucketM3 > 0 {
+			d.BucketM3 = meta.BucketM3
+		}
 	}
 	t.broadcastDevice(d)
 	return summary(d), nil

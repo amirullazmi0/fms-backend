@@ -18,6 +18,8 @@ type DeviceUsecase interface {
 	GetDevices(ctx context.Context) []dto.Device
 	GetDevice(ctx context.Context, imei string, limit int) (*dto.DeviceDetail, error)
 	UpdateDevice(ctx context.Context, imei string, req dto.UpdateDeviceRequest, userID string) (*dto.Device, error)
+	// Installs: riwayat pemasangan tracker ke unit (terbaru dulu).
+	Installs(ctx context.Context, imei string) ([]dto.DeviceInstall, error)
 	DeleteDevice(ctx context.Context, imei, userID string) error
 	Day(ctx context.Context, imei string, q dto.DayQuery) (*dto.DaySummary, error)
 	Ritase(ctx context.Context, imei string, q dto.DayQuery) (*dto.RouteReport, error)
@@ -192,3 +194,7 @@ func (u *deviceUsecase) Status() dto.ServerStatus { return u.tracker.Status() }
 func (u *deviceUsecase) Logs(limit int) []dto.LogEntry { return u.tracker.Logs(limit) }
 
 func (u *deviceUsecase) Place(lat, lng float64) *string { return u.geocoder.PlaceName(lat, lng) }
+
+func (u *deviceUsecase) Installs(ctx context.Context, imei string) ([]dto.DeviceInstall, error) {
+	return u.deviceRepo.Installs(ctx, imei)
+}

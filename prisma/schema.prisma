@@ -150,12 +150,18 @@ model Device {
   /// Muatan per rit (truck factor, ton). Tonase = ritase × payload_ton.
   payloadTon      Float        @default(20) @map("payload_ton")
   unitType        UnitType     @default(DT) @map("unit_type")
+  brand           String?      @db.VarChar(60)
+  modelName       String?      @map("model") @db.VarChar(60)
+  trackerModel    String?      @map("tracker_model") @db.VarChar(30)
+  /// Kapasitas bucket excavator (m³).
+  bucketM3        Float?       @map("bucket_m3")
   updatedAt       DateTime     @default(now()) @map("updated_at") @db.Timestamptz(3)
   deletedAt       DateTime?    @map("deleted_at") @db.Timestamptz(3)
   createdBy       String?      @map("created_by") @db.Uuid
   updatedBy       String?      @map("updated_by") @db.Uuid
   deletedBy       String?      @map("deleted_by") @db.Uuid
   records         Record[]
+  installs        DeviceInstall[]
   events          Event[]
   commands        Command[]
   assignments     Assignment[]
@@ -708,4 +714,19 @@ model DriverLegacy {
   deletedBy  String?   @map("deleted_by") @db.Uuid
 
   @@map("drivers_legacy")
+}
+
+/// Riwayat pemasangan tracker (IMEI) ke unit (plat). removedAt null = masih terpasang.
+model DeviceInstall {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  imei        String
+  plate       String    @db.VarChar(60)
+  name        String?   @db.VarChar(60)
+  installedAt DateTime  @map("installed_at") @db.Timestamptz(3)
+  removedAt   DateTime? @map("removed_at") @db.Timestamptz(3)
+  createdBy   String?   @map("created_by") @db.Uuid
+  device      Device    @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([imei, installedAt], map: "device_installs_imei")
+  @@map("device_installs")
 }

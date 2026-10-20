@@ -189,6 +189,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			devices.PATCH("/:imei", can(model.PermissionDeviceUpdate), deviceHandler.UpdateDevice)
 			devices.DELETE("/:imei", can(model.PermissionDeviceDelete), deviceHandler.DeleteDevice)
 			devices.GET("/:imei/day", can(model.PermissionDeviceRead), deviceHandler.Day)
+			devices.GET("/:imei/installs", can(model.PermissionDeviceRead), deviceHandler.Installs)
 			devices.GET("/:imei/ritase", can(model.PermissionDeviceRead, model.PermissionReportRead), deviceHandler.Ritase)
 			devices.GET("/:imei/records", can(model.PermissionDeviceRead), deviceHandler.Records)
 			devices.GET("/:imei/raw", can(model.PermissionDeviceRead), deviceHandler.RawRecords)

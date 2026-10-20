@@ -265,3 +265,22 @@ func (h *DeviceHandler) Place(c *gin.Context) {
 	}
 	response.Success(c, http.StatusOK, "Place retrieved successfully", dto.PlaceResponse{Place: h.deviceUsecase.Place(lat, lng)})
 }
+
+// Installs godoc
+// @Summary Riwayat pemasangan tracker (IMEI) ke unit (plat), terbaru dulu
+// @Tags devices
+// @Security BearerAuth
+// @Success 200 {object} response.Response{data=[]dto.DeviceInstall}
+// @Router /api/devices/{imei}/installs [get]
+func (h *DeviceHandler) Installs(c *gin.Context) {
+	imei, ok := validImei(c)
+	if !ok {
+		return
+	}
+	list, err := h.deviceUsecase.Installs(c.Request.Context(), imei)
+	if err != nil {
+		respondError(c, err, "Failed to get installs")
+		return
+	}
+	response.Success(c, http.StatusOK, "Installs retrieved successfully", list)
+}

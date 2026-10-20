@@ -54,6 +54,11 @@ type Device struct {
 	Vehicle     *string          `json:"vehicle"`
 	PayloadTon  float64          `json:"payloadTon"` // truck factor: ton per rit
 	UnitType    string           `json:"unitType"`   // DT | EX | LV | SUPPORT
+	// P2-4: merek & model unit, model tracker (FMC150 / FMC650 / ...), kapasitas bucket (excavator, m³).
+	Brand        *string  `json:"brand"`
+	Model        *string  `json:"model"`
+	TrackerModel *string  `json:"trackerModel"`
+	BucketM3     *float64 `json:"bucketM3"`
 	Online      bool             `json:"online"`
 	Remote      *string          `json:"remote"`
 	ConnectedAt *int64           `json:"connectedAt"`
@@ -78,6 +83,11 @@ type UpdateDeviceRequest struct {
 	// PayloadTon: truck factor (ton per rit).
 	PayloadTon *float64 `json:"payloadTon" validate:"omitempty,gt=0,lte=500"`
 	UnitType   *string  `json:"unitType" validate:"omitempty,oneof=DT EX LV SUPPORT"`
+	// "" clears brand / model / trackerModel; bucketM3 0 clears it.
+	Brand        *string  `json:"brand" validate:"omitempty,max=60"`
+	Model        *string  `json:"model" validate:"omitempty,max=60"`
+	TrackerModel *string  `json:"trackerModel" validate:"omitempty,max=30"`
+	BucketM3     *float64 `json:"bucketM3" validate:"omitempty,gte=0,lte=100"`
 }
 
 type CommandRequest struct {
@@ -142,8 +152,12 @@ type DeviceMeta struct {
 	Plate   *string
 	Vehicle *string
 	// nil = keep the stored value
-	PayloadTon *float64
-	UnitType   *string
+	PayloadTon   *float64
+	UnitType     *string
+	Brand        *string
+	Model        *string
+	TrackerModel *string
+	BucketM3     *float64
 }
 
 // DeviceRow is a devices table row plus its record count.
@@ -154,6 +168,10 @@ type DeviceRow struct {
 	Vehicle         *string
 	PayloadTon      float64
 	UnitType        string
+	Brand           *string
+	Model           *string
+	TrackerModel    *string
+	BucketM3        *float64
 	FirstSeen       int64
 	LastSeen        *int64
 	LastConnectedAt *int64
@@ -182,4 +200,14 @@ type RawRecordsQuery struct {
 	To    int64 `form:"to"`
 	Page  int   `form:"page"`
 	Limit int   `form:"limit"`
+}
+
+// DeviceInstall: satu periode tracker (IMEI) terpasang di satu unit (plat). RemovedAt nil = masih terpasang.
+type DeviceInstall struct {
+	ID          string  `json:"id"`
+	Imei        string  `json:"imei"`
+	Plate       string  `json:"plate"`
+	Name        *string `json:"name"`
+	InstalledAt int64   `json:"installedAt"`
+	RemovedAt   *int64  `json:"removedAt"`
 }

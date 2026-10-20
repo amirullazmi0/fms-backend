@@ -44,6 +44,8 @@ type SiteRepository interface {
 	CreateSite(ctx context.Context, body dto.UpsertSiteRequest, createdBy string) (string, error)
 	UpdateSite(ctx context.Context, id string, body dto.UpsertSiteRequest, updatedBy string) (bool, error)
 	DeleteSite(ctx context.Context, id, deletedBy string) (bool, error)
+	// ReplaceZones swaps every queue/spot zone of a site and sets its queue alert thresholds.
+	ReplaceZones(ctx context.Context, id string, body dto.UpdateSiteZonesRequest, updatedBy string) (bool, error)
 	RoutesUsingSite(ctx context.Context, id string) ([]string, error)
 
 	GetRoutes(ctx context.Context, q *dto.QueryGlobal) ([]dto.Route, int, error)
@@ -71,6 +73,9 @@ var siteColumns = []string{
 	"s.id", "s.name", "s.lat", "s.lng", "s.radius_m", "s.note", "s.created_at", "s.updated_at",
 	`(SELECT array_agg(DISTINCT a.imei) FROM ` + onDuty + ` JOIN routes r ON r.id = a.route_id
 		WHERE r.loading_site_id = s.id OR r.unloading_site_id = s.id) AS imeis`,
+	"s.queue_alert_trucks", "s.queue_alert_min",
+	`(SELECT COALESCE(json_agg(json_build_object('id', z.id, 'kind', z.kind, 'lat', z.lat, 'lng', z.lng, 'radius', z.radius_m)
+		ORDER BY z.kind, z.created_at), '[]') FROM site_zones z WHERE z.site_id = s.id AND z.deleted_at IS NULL) AS zones`,
 }
 
 func scanSites(rows *sql.Rows) ([]dto.Site, error) {
@@ -81,7 +86,13 @@ func scanSites(rows *sql.Rows) ([]dto.Site, error) {
 		var note sql.NullString
 		var created, updated time.Time
 		var imeis pq.StringArray
-		if err := rows.Scan(&s.ID, &s.Name, &s.Lat, &s.Lng, &s.Radius, &note, &created, &updated, &imeis); err != nil {
+		var zones []byte
+		if err := rows.Scan(&s.ID, &s.Name, &s.Lat, &s.Lng, &s.Radius, &note, &created, &updated, &imeis,
+			&s.QueueAlertTrucks, &s.QueueAlertMin, &zones); err != nil {
+			return nil, err
+		}
+		s.Zones = []dto.SiteZone{}
+		if err := json.Unmarshal(zones, &s.Zones); err != nil {
 			return nil, err
 		}
 		s.Note = database.NullString(note)
@@ -193,6 +204,45 @@ func (r *siteRepository) UpdateSite(ctx context.Context, id string, body dto.Ups
 	return affected(res, err)
 }
 
+func (r *siteRepository) ReplaceZones(ctx context.Context, id string, body dto.UpdateSiteZonesRequest, updatedBy string) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	ok, err := affected(database.NewUpdateBuilder("sites").
+		Set("queue_alert_trucks", body.QueueAlertTrucks).
+		Set("queue_alert_min", body.QueueAlertMin).
+		SetUpdatedBy(updatedBy).
+		Where("id = $1", id).
+		Where("deleted_at IS NULL").
+		ExecuteContext(ctx, tx))
+	if err != nil || !ok {
+		return ok, err
+	}
+	if _, err := database.NewDeleteBuilder("site_zones").HardDelete().Where("site_id = $1", id).ExecuteContext(ctx, tx); err != nil {
+		return false, err
+	}
+	for _, z := range body.Zones {
+		radius := z.Radius
+		if radius <= 0 {
+			radius = 20
+		}
+		if _, err := database.NewInsertBuilder("site_zones").
+			Set("site_id", id).
+			Set("kind", z.Kind).
+			Set("lat", *z.Lat).
+			Set("lng", *z.Lng).
+			Set("radius_m", radius).
+			SetCreatedBy(updatedBy).
+			WithoutReturning().
+			ExecContext(ctx, tx); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
+}
+
 func (r *siteRepository) DeleteSite(ctx context.Context, id, deletedBy string) (bool, error) {
 	res, err := database.NewDeleteBuilder("sites").
 		SetDeletedBy(deletedBy).
@@ -221,10 +271,10 @@ var routeColumns = []string{
 	"r.id", "r.name", "r.loading_site_id", "r.unloading_site_id", "r.note", "r.created_at", "r.updated_at",
 	`(SELECT json_agg(json_build_object('shiftId', a.shift_id, 'shiftName', a.shift_name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
 			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint) ORDER BY d.name)
-		FROM ` + onDuty + ` JOIN drivers d ON d.id = a.driver_id WHERE a.route_id = r.id) AS on_duty`,
+		FROM ` + onDuty + ` JOIN users d ON d.id = a.driver_id WHERE a.route_id = r.id) AS on_duty`,
 	`(SELECT json_agg(json_build_object('shiftId', a.shift_id, 'shiftName', a.shift_name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
 			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint) ORDER BY a.closed_at DESC)
-		FROM ` + recentDone + ` JOIN drivers d ON d.id = a.driver_id WHERE a.route_id = r.id) AS recent_done`,
+		FROM ` + recentDone + ` JOIN users d ON d.id = a.driver_id WHERE a.route_id = r.id) AS recent_done`,
 }
 
 func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {

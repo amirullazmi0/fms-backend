@@ -21,6 +21,7 @@ type SiteUsecase interface {
 	CreateSite(ctx context.Context, body dto.UpsertSiteRequest, userID string) (*dto.Site, error)
 	UpdateSite(ctx context.Context, id string, body dto.UpsertSiteRequest, userID string) (*dto.Site, error)
 	DeleteSite(ctx context.Context, id, userID string) error
+	UpdateZones(ctx context.Context, id string, body dto.UpdateSiteZonesRequest, userID string) (*dto.Site, error)
 
 	GetRoutes(ctx context.Context, q *dto.QueryGlobal) ([]dto.Route, int, error)
 	CreateRoute(ctx context.Context, body dto.UpsertRouteRequest, userID string) (*dto.Route, error)
@@ -90,6 +91,24 @@ func (u *siteUsecase) UpdateSite(ctx context.Context, id string, body dto.Upsert
 	return site, nil
 }
 
+// UpdateZones sets the queue / spot zones and queue alert thresholds of a site.
+func (u *siteUsecase) UpdateZones(ctx context.Context, id string, body dto.UpdateSiteZonesRequest, userID string) (*dto.Site, error) {
+	ok, err := u.siteRepo.ReplaceZones(ctx, id, body, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, apperror.NotFound("Titik nggak ada")
+	}
+	site, err := u.siteByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	u.tracker.Log("conn", "", "Zona antre/spot titik \""+site.Name+"\" diubah", "info")
+	u.tracker.Changed("sites")
+	return site, nil
+}
+
 func (u *siteUsecase) DeleteSite(ctx context.Context, id, userID string) error {
 	used, err := u.siteRepo.RoutesUsingSite(ctx, id)
 	if err != nil {
@@ -119,7 +138,7 @@ func (u *siteUsecase) checkRouteSites(ctx context.Context, body dto.UpsertRouteR
 		return nil, nil, apperror.BadRequest("Nama rute wajib diisi")
 	}
 	if body.LoadingID == body.UnloadingID {
-		return nil, nil, apperror.BadRequest("Titik loading dan unloading harus beda")
+		return nil, nil, apperror.BadRequest("Front loading dan dumping harus beda")
 	}
 	found, err := u.siteRepo.SitesByIDs(ctx, []string{body.LoadingID, body.UnloadingID}, false)
 	if err != nil {
@@ -134,10 +153,10 @@ func (u *siteUsecase) checkRouteSites(ctx context.Context, body dto.UpsertRouteR
 		}
 	}
 	if loading == nil {
-		return nil, nil, apperror.BadRequest("Pilih titik loading")
+		return nil, nil, apperror.BadRequest("Pilih front loading")
 	}
 	if unloading == nil {
-		return nil, nil, apperror.BadRequest("Pilih titik unloading")
+		return nil, nil, apperror.BadRequest("Pilih titik dumping")
 	}
 	return loading, unloading, nil
 }

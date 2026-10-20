@@ -75,6 +75,30 @@ func (h *SiteHandler) UpdateSite(c *gin.Context) {
 	response.Success(c, http.StatusOK, "Site updated successfully", site)
 }
 
+// UpdateZones godoc
+// @Summary Replace the queue / spot zones and queue alert thresholds of a site
+// @Tags sites
+// @Security BearerAuth
+// @Param body body dto.UpdateSiteZonesRequest true "Zones"
+// @Success 200 {object} response.Response{data=dto.Site}
+// @Router /api/sites/{id}/zones [put]
+func (h *SiteHandler) UpdateZones(c *gin.Context) {
+	id, ok := validUUID(c, "id")
+	if !ok {
+		return
+	}
+	var body dto.UpdateSiteZonesRequest
+	if !bindJSON(c, &body) {
+		return
+	}
+	site, err := h.siteUsecase.UpdateZones(c.Request.Context(), id, body, c.GetString("user_id"))
+	if err != nil {
+		respondError(c, err, "Failed to update zones")
+		return
+	}
+	response.Success(c, http.StatusOK, "Zones updated successfully", site)
+}
+
 // DeleteSite godoc
 // @Summary Delete a site (admin, soft delete; 409 while a route uses it)
 // @Tags sites

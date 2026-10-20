@@ -9,8 +9,36 @@ type Site struct {
 	Radius    int      `json:"radius"` // meter
 	Note      *string  `json:"note"`
 	Imeis     []string `json:"imeis"` // trucks on duty on a route through this site
-	CreatedAt int64    `json:"createdAt"`
-	UpdatedAt int64    `json:"updatedAt"`
+	// Queue alert: >= QueueAlertTrucks units queuing longer than QueueAlertMin minutes.
+	// omitempty: sites inside ritase reports keep their old JSON shape (golden test).
+	QueueAlertTrucks int        `json:"queueAlertTrucks,omitempty"`
+	QueueAlertMin    int        `json:"queueAlertMin,omitempty"`
+	Zones            []SiteZone `json:"zones,omitempty"`
+	CreatedAt        int64      `json:"createdAt"`
+	UpdatedAt        int64      `json:"updatedAt"`
+}
+
+// SiteZone is a circle inside / next to a site: the queue line or the spot (loading / dumping position).
+type SiteZone struct {
+	ID     string  `json:"id"`
+	Kind   string  `json:"kind"` // queue | spot
+	Lat    float64 `json:"lat"`
+	Lng    float64 `json:"lng"`
+	Radius int     `json:"radius"` // meter
+}
+
+type SiteZoneInput struct {
+	Kind   string   `json:"kind" validate:"required,oneof=queue spot"`
+	Lat    *float64 `json:"lat" validate:"required,min=-90,max=90"`
+	Lng    *float64 `json:"lng" validate:"required,min=-180,max=180"`
+	Radius int      `json:"radius" validate:"min=3,max=1000"`
+}
+
+// UpdateSiteZonesRequest replaces all zones of a site and its queue alert thresholds.
+type UpdateSiteZonesRequest struct {
+	QueueAlertTrucks int             `json:"queueAlertTrucks" validate:"min=1,max=100"`
+	QueueAlertMin    int             `json:"queueAlertMin" validate:"min=1,max=600"`
+	Zones            []SiteZoneInput `json:"zones" validate:"max=20,dive"`
 }
 
 type UpsertSiteRequest struct {

@@ -66,9 +66,12 @@ func (r *visitRepository) ReplaceVisits(ctx context.Context, assignmentID string
 	const upsert = ` ON CONFLICT (imei, site_id, arrive_at) DO UPDATE SET
 		assignment_id = EXCLUDED.assignment_id, shift_id = EXCLUDED.shift_id, driver_id = EXCLUDED.driver_id,
 		route_id = EXCLUDED.route_id, site_name = EXCLUDED.site_name, role = EXCLUDED.role,
-		depart_at = EXCLUDED.depart_at, dwell_ms = EXCLUDED.dwell_ms, status = EXCLUDED.status, computed_at = CURRENT_TIMESTAMP
+		depart_at = EXCLUDED.depart_at, dwell_ms = EXCLUDED.dwell_ms, status = EXCLUDED.status,
+		queue_ms = EXCLUDED.queue_ms, spot_ms = EXCLUDED.spot_ms, work_ms = EXCLUDED.work_ms, computed_at = CURRENT_TIMESTAMP
 		WHERE site_visits.depart_at IS DISTINCT FROM EXCLUDED.depart_at OR site_visits.dwell_ms IS DISTINCT FROM EXCLUDED.dwell_ms
-		   OR site_visits.assignment_id IS DISTINCT FROM EXCLUDED.assignment_id OR site_visits.status IS DISTINCT FROM EXCLUDED.status`
+		   OR site_visits.assignment_id IS DISTINCT FROM EXCLUDED.assignment_id OR site_visits.status IS DISTINCT FROM EXCLUDED.status
+		   OR site_visits.queue_ms IS DISTINCT FROM EXCLUDED.queue_ms OR site_visits.spot_ms IS DISTINCT FROM EXCLUDED.spot_ms
+		   OR site_visits.work_ms IS DISTINCT FROM EXCLUDED.work_ms`
 	for _, v := range visits {
 		status := "done"
 		if v.Finished {
@@ -89,6 +92,9 @@ func (r *visitRepository) ReplaceVisits(ctx context.Context, assignmentID string
 			Set("depart_at", database.FromMsPtr(v.DepartAt)).
 			Set("dwell_ms", v.DwellMs).
 			Set("status", status).
+			Set("queue_ms", v.QueueMs).
+			Set("spot_ms", v.SpotMs).
+			Set("work_ms", v.WorkMs).
 			WithoutReturning().
 			Build()
 		res, err := database.RawExecContext(ctx, tx, query+upsert, args...)
@@ -183,7 +189,7 @@ func (r *visitRepository) Report(ctx context.Context, f dto.TripFilter, now int6
 		SELECT v.imei, COALESCE(NULLIF(d.plate, ''), NULLIF(d.name, ''), v.imei), dr.name, ro.name, v.site_name, v.role::text, v.arrive_at
 		FROM site_visits v
 		LEFT JOIN devices d ON d.imei = v.imei
-		LEFT JOIN drivers dr ON dr.id = v.driver_id
+		LEFT JOIN users dr ON dr.id = v.driver_id
 		LEFT JOIN routes ro ON ro.id = v.route_id
 		WHERE v.status = 'inside' AND v.arrive_at > now() - interval '1 day'
 		ORDER BY v.arrive_at`)
@@ -222,7 +228,7 @@ func (r *visitRepository) ListVisits(ctx context.Context, f dto.TripFilter, role
 		       v.site_name, v.role::text, v.status::text, v.arrive_at, v.depart_at, v.dwell_ms
 		FROM site_visits v
 		LEFT JOIN devices d ON d.imei = v.imei
-		LEFT JOIN drivers dr ON dr.id = v.driver_id
+		LEFT JOIN users dr ON dr.id = v.driver_id
 		LEFT JOIN shifts sh ON sh.id = v.shift_id
 		LEFT JOIN routes ro ON ro.id = v.route_id
 		WHERE %s ORDER BY v.arrive_at DESC LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args)), args...)

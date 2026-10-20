@@ -111,3 +111,60 @@ type StageReport struct {
 	To   int64      `json:"to"`
 	Rows []StageRow `json:"rows"`
 }
+
+// ---------- PA & UA (P2-2) ----------
+
+// AvailabilityQuery: period + bucket (total | day | month), optional unit / unit type.
+type AvailabilityQuery struct {
+	From     int64  `form:"from"`
+	To       int64  `form:"to"`
+	Bucket   string `form:"bucket" validate:"omitempty,oneof=total day month"`
+	Imei     string `form:"imei" validate:"omitempty,len=15,numeric"`
+	UnitType string `form:"unitType" validate:"omitempty,oneof=DT EX LV SUPPORT"`
+}
+
+// StatusInterval: one unit status log clipped to the period. Category follows the delay code,
+// or the status when there is no code (standby without a code = unplanned).
+type StatusInterval struct {
+	Imei     string
+	Category string // working | standby_planned | standby_unplanned | breakdown
+	Start    int64
+	End      int64
+}
+
+// AvailabilityUnit: unit identity for the availability report.
+type AvailabilityUnit struct {
+	Imei     string
+	Label    string
+	UnitType string
+}
+
+// AvailabilityRow: time per category and the indicators (percent, nil when undefined).
+// PA = (T − BD) / T, UA = Working / (T − BD), MA = Working / (Working + BD), EU = Working / T.
+// NoStatusMs = time without any status log (counted as available, not working).
+type AvailabilityRow struct {
+	Key                string   `json:"key"` // imei | unit type | "all"
+	Label              string   `json:"label"`
+	UnitType           string   `json:"unitType,omitempty"`
+	Period             string   `json:"period,omitempty"` // YYYY-MM-DD | YYYY-MM, empty = whole period
+	Units              int      `json:"units"`
+	TotalMs            float64  `json:"totalMs"`
+	WorkingMs          float64  `json:"workingMs"`
+	StandbyPlannedMs   float64  `json:"standbyPlannedMs"`
+	StandbyUnplannedMs float64  `json:"standbyUnplannedMs"`
+	BreakdownMs        float64  `json:"breakdownMs"`
+	NoStatusMs         float64  `json:"noStatusMs"`
+	PA                 *float64 `json:"pa"`
+	UA                 *float64 `json:"ua"`
+	MA                 *float64 `json:"ma"`
+	EU                 *float64 `json:"eu"`
+}
+
+type AvailabilityReport struct {
+	From   int64             `json:"from"`
+	To     int64             `json:"to"`
+	Bucket string            `json:"bucket"`
+	Units  []AvailabilityRow `json:"units"` // per unit (per period when bucketed)
+	Types  []AvailabilityRow `json:"types"` // per unit type
+	Total  []AvailabilityRow `json:"total"` // all units (one row per period)
+}

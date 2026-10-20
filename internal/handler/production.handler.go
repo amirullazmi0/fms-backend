@@ -143,3 +143,27 @@ func (h *ProductionHandler) Stages(c *gin.Context) {
 	}
 	response.Success(c, http.StatusOK, "Stage report retrieved successfully", r)
 }
+
+// Availability godoc
+// @Summary PA, UA, MA & EU per unit, per unit type and all units (from the unit status log)
+// @Tags production
+// @Security BearerAuth
+// @Param from query int false "Start (ms)"
+// @Param to query int false "End (ms)"
+// @Param bucket query string false "total | day | month"
+// @Param imei query string false "Unit"
+// @Param unitType query string false "DT | EX | LV | SUPPORT"
+// @Success 200 {object} response.Response{data=dto.AvailabilityReport}
+// @Router /api/reports/availability [get]
+func (h *ProductionHandler) Availability(c *gin.Context) {
+	var q dto.AvailabilityQuery
+	if !bindQuery(c, &q) {
+		return
+	}
+	r, err := h.productionUsecase.Availability(c.Request.Context(), q)
+	if err != nil {
+		respondError(c, err, "Failed to build availability report")
+		return
+	}
+	response.Success(c, http.StatusOK, "Availability report retrieved successfully", r)
+}

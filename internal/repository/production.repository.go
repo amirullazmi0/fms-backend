@@ -26,6 +26,10 @@ type ProductionRepository interface {
 	Freshness(ctx context.Context, withinMs, lateMs int64) (map[string]dto.Freshness, error)
 	// Stages: average stage times per route in the period.
 	Stages(ctx context.Context, f dto.TripFilter) ([]dto.StageRow, error)
+	// StatusIntervals: unit status logs overlapping [from, to), clipped to it (open log = until now).
+	StatusIntervals(ctx context.Context, from, to int64) ([]dto.StatusInterval, error)
+	// AvailabilityUnits: units (not deleted) for the availability report.
+	AvailabilityUnits(ctx context.Context) ([]dto.AvailabilityUnit, error)
 }
 
 type productionRepository struct {
@@ -273,4 +277,47 @@ func (r *productionRepository) Stages(ctx context.Context, f dto.TripFilter) ([]
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].RouteName) < strings.ToLower(out[j].RouteName) })
 	return out, nil
+}
+
+func (r *productionRepository) StatusIntervals(ctx context.Context, from, to int64) ([]dto.StatusInterval, error) {
+	rows, err := database.RawQueryContext(ctx, r.db, `SELECT l.imei,
+			COALESCE(dc.category::text, CASE l.status WHEN 'working' THEN 'working' WHEN 'breakdown' THEN 'breakdown' ELSE 'standby_unplanned' END),
+			(EXTRACT(EPOCH FROM GREATEST(l.start_at, $1)) * 1000)::bigint,
+			(EXTRACT(EPOCH FROM LEAST(COALESCE(l.end_at, now()), $2)) * 1000)::bigint
+		FROM unit_status_logs l LEFT JOIN delay_codes dc ON dc.code = l.delay_code
+		WHERE l.start_at < $2 AND COALESCE(l.end_at, now()) > $1
+		ORDER BY l.imei, l.start_at`, database.FromMs(from), database.FromMs(to))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []dto.StatusInterval{}
+	for rows.Next() {
+		var s dto.StatusInterval
+		if err := rows.Scan(&s.Imei, &s.Category, &s.Start, &s.End); err != nil {
+			return nil, err
+		}
+		if s.End > s.Start {
+			out = append(out, s)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (r *productionRepository) AvailabilityUnits(ctx context.Context) ([]dto.AvailabilityUnit, error) {
+	rows, err := database.RawQueryContext(ctx, r.db, `SELECT imei, COALESCE(NULLIF(plate, ''), NULLIF(name, ''), imei), unit_type::text
+		FROM devices WHERE deleted_at IS NULL ORDER BY 2`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []dto.AvailabilityUnit{}
+	for rows.Next() {
+		var u dto.AvailabilityUnit
+		if err := rows.Scan(&u.Imei, &u.Label, &u.UnitType); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }

@@ -84,7 +84,7 @@ var Groups = map[string]string{
 	"power":   "Power",
 	"io":      "Input/Output",
 	"driving": "Perilaku & event",
-	"can":     "CAN kendaraan",
+	"can":     "CAN unit",
 }
 
 func isSigned(id int) bool {

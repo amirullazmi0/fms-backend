@@ -57,6 +57,9 @@ type Scheduler struct {
 	queueMu      sync.Mutex
 	queueSince   map[string]int64 // site|imei → first seen queuing by GPS
 	queueAlerted map[string]int64 // site → last alert
+
+	loc        *time.Location // report time zone: break times (HH:MM) are local times
+	lastBreaks int64
 }
 
 type lateRange struct{ from, to int64 }
@@ -380,6 +383,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 		}
 	}
 	s.checkQueues(ctx, now)
+	s.checkBreaks(ctx, now)
 
 	// Safety net: a stay can only be "inside" while its shift runs.
 	if s.visits != nil {

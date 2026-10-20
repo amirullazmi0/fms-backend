@@ -14,6 +14,9 @@ import (
 
 // MdtRepository covers delay codes, unit status logs and the MDT tablets in the cabs.
 type MdtRepository interface {
+	// StartBreak / EndBreak: scheduled break of a shift (P2-3); returns the units changed.
+	StartBreak(ctx context.Context, shiftID, code string, start int64) ([]string, error)
+	EndBreak(ctx context.Context, shiftID, code string, start, end int64) ([]string, error)
 	DelayCodes(ctx context.Context, activeOnly bool) ([]dto.DelayCode, error)
 	DelayCode(ctx context.Context, code string) (*dto.DelayCode, error)
 	UpsertDelayCode(ctx context.Context, body dto.UpsertDelayCodeRequest, userID string) error

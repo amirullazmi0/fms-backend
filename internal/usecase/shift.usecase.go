@@ -146,6 +146,9 @@ func (u *shiftUsecase) GetTemplates(ctx context.Context) ([]dto.ShiftTemplate, e
 }
 
 func (u *shiftUsecase) CreateTemplate(ctx context.Context, body dto.UpsertShiftTemplateRequest, userID string) (*dto.ShiftTemplate, error) {
+	if err := u.checkBreaks(ctx, body.Breaks); err != nil {
+		return nil, err
+	}
 	id, err := u.driverRepo.CreateTemplate(ctx, body, userID)
 	if err != nil {
 		return nil, err
@@ -155,6 +158,9 @@ func (u *shiftUsecase) CreateTemplate(ctx context.Context, body dto.UpsertShiftT
 }
 
 func (u *shiftUsecase) UpdateTemplate(ctx context.Context, id string, body dto.UpsertShiftTemplateRequest, userID string) (*dto.ShiftTemplate, error) {
+	if err := u.checkBreaks(ctx, body.Breaks); err != nil {
+		return nil, err
+	}
 	ok, err := u.driverRepo.UpdateTemplate(ctx, id, body, userID)
 	if err != nil {
 		return nil, err
@@ -253,7 +259,10 @@ func (u *shiftUsecase) CreateShift(ctx context.Context, body dto.CreateShiftRequ
 	routeID := body.RouteID
 	in := dto.ShiftInput{
 		Name: name, RouteID: &routeID, Date: body.Date, PlannedStart: body.PlannedStart, PlannedEnd: body.PlannedEnd,
-		AutoClose: body.AutoClose == nil || *body.AutoClose, Note: trimmed(body.Note),
+		AutoClose: body.AutoClose == nil || *body.AutoClose, Note: trimmed(body.Note), Breaks: body.Breaks,
+	}
+	if err := u.checkBreaks(ctx, in.Breaks); err != nil {
+		return nil, err
 	}
 	id, err := u.shiftRepo.CreateShift(ctx, in, userID)
 	if err != nil {
@@ -271,7 +280,13 @@ func (u *shiftUsecase) UpdateShift(ctx context.Context, id string, body dto.Upda
 	}
 	n := dto.ShiftInput{
 		Name: cur.Name, RouteID: cur.RouteID, Date: cur.Date, PlannedStart: cur.PlannedStart, PlannedEnd: cur.PlannedEnd,
-		AutoClose: cur.AutoClose, Note: cur.Note,
+		AutoClose: cur.AutoClose, Note: cur.Note, Breaks: cur.Breaks,
+	}
+	if body.Breaks != nil {
+		if err := u.checkBreaks(ctx, *body.Breaks); err != nil {
+			return nil, err
+		}
+		n.Breaks = *body.Breaks
 	}
 	if body.Name != nil {
 		if n.Name = strings.TrimSpace(*body.Name); n.Name == "" {
@@ -622,4 +637,23 @@ func (u *shiftUsecase) ReportVisitList(ctx context.Context, q dto.ReportQuery) (
 		limit = 200
 	}
 	return u.visitRepo.ListVisits(ctx, u.filterOf(q), q.Role, min(limit, 2000), max(q.Offset, 0), time.Now().UnixMilli())
+}
+
+// checkBreaks: every break uses an active delay code (normally standby terencana, e.g. ISHOMA).
+func (u *shiftUsecase) checkBreaks(ctx context.Context, breaks []dto.ShiftBreak) error {
+	if len(breaks) == 0 {
+		return nil
+	}
+	codes := make([]string, len(breaks))
+	for i, b := range breaks {
+		codes[i] = b.Code
+	}
+	unknown, err := u.shiftRepo.UnknownDelayCodes(ctx, codes)
+	if err != nil {
+		return err
+	}
+	if len(unknown) > 0 {
+		return apperror.BadRequest("Delay code istirahat tidak dikenal: " + strings.Join(unknown, ", "))
+	}
+	return nil
 }

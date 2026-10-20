@@ -59,7 +59,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 		return nil, fmt.Errorf("load place cache: %w", err)
 	}
 	router := routing.New(cfg.Routing.Enabled, cfg.Routing.OSRMURL, cfg.Routing.TruckFactor, routing.NewRoadGraph(cfg.Routing.OverpassURL, cfg.App.DataDir).WithStore(roadRepo))
-	shiftScheduler := scheduler.New(shiftRepo, siteRepo, tripRepo, deviceRepo, driverRepo, liveTracker).WithVisits(visitRepo).WithMdt(mdtRepo)
+	shiftScheduler := scheduler.New(shiftRepo, siteRepo, tripRepo, deviceRepo, driverRepo, liveTracker).WithVisits(visitRepo).WithMdt(mdtRepo).WithLocation(cfg.Report.Location)
 
 	// Usecases & handlers
 	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, &cfg.JWT)

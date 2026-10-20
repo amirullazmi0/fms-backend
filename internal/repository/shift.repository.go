@@ -14,6 +14,8 @@ import (
 
 // ShiftRepository covers work shifts and their driver–truck–route assignments.
 type ShiftRepository interface {
+	// UnknownDelayCodes: the codes that are not an active delay code.
+	UnknownDelayCodes(ctx context.Context, codes []string) ([]string, error)
 	// ListShifts: shifts with a work date in [fromDate, toDate], plus every active shift.
 	ListShifts(ctx context.Context, fromDate, toDate string) ([]dto.Shift, error)
 	GetShift(ctx context.Context, id string) (*dto.Shift, error)
@@ -65,7 +67,7 @@ func NewShiftRepository(db *sql.DB) ShiftRepository {
 
 var shiftColumns = []string{
 	"s.id", "s.name", "s.route_id", "to_char(s.date, 'YYYY-MM-DD')", "s.planned_start", "s.planned_end", "s.auto_close", "s.status::text",
-	"s.started_at", "s.closed_at", "s.close_reason::text", "s.overdue_noted", "s.note", "s.created_at", "s.updated_at",
+	"s.started_at", "s.closed_at", "s.close_reason::text", "s.overdue_noted", "s.note", "s.created_at", "s.updated_at", "s.breaks::text",
 }
 
 func scanShift(row interface{ Scan(...any) error }, now int64) (dto.Shift, error) {
@@ -73,9 +75,11 @@ func scanShift(row interface{ Scan(...any) error }, now int64) (dto.Shift, error
 	var route, reason, note sql.NullString
 	var ps, pe, created, updated time.Time
 	var started, closed sql.NullTime
-	if err := row.Scan(&s.ID, &s.Name, &route, &s.Date, &ps, &pe, &s.AutoClose, &s.Status, &started, &closed, &reason, &s.OverdueNoted, &note, &created, &updated); err != nil {
+	var breaks string
+	if err := row.Scan(&s.ID, &s.Name, &route, &s.Date, &ps, &pe, &s.AutoClose, &s.Status, &started, &closed, &reason, &s.OverdueNoted, &note, &created, &updated, &breaks); err != nil {
 		return s, err
 	}
+	s.Breaks = BreaksOf(breaks)
 	s.RouteID, s.CloseReason, s.Note = database.NullString(route), database.NullString(reason), database.NullString(note)
 	s.PlannedStart, s.PlannedEnd = database.Ms(ps), database.Ms(pe)
 	s.StartedAt, s.ClosedAt = database.NullMs(started), database.NullMs(closed)
@@ -219,6 +223,7 @@ func (r *shiftRepository) CreateShift(ctx context.Context, s dto.ShiftInput, cre
 		Set("auto_close", s.AutoClose).
 		Set("note", s.Note).
 		Set("route_id", s.RouteID).
+		Set("breaks", BreaksJSON(s.Breaks)).
 		SetCreatedBy(createdBy).
 		QueryRowContext(ctx, r.db).Scan(&id)
 	return id, err
@@ -238,6 +243,7 @@ func (r *shiftRepository) UpdateShift(ctx context.Context, id string, s dto.Shif
 		Set("auto_close", s.AutoClose).
 		Set("note", s.Note).
 		Set("route_id", s.RouteID).
+		Set("breaks", BreaksJSON(s.Breaks)).
 		// Moving the planned end (extending) lets the "overdue" warning fire again later.
 		SetExpr("overdue_noted", "CASE WHEN $1 <> planned_end THEN false ELSE overdue_noted END", database.FromMs(s.PlannedEnd)).
 		Where("id = $1", id).

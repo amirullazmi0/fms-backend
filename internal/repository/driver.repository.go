@@ -217,12 +217,16 @@ func (r *driverRepository) LastAssignments(ctx context.Context) (map[string]dto.
 
 // ---------- Shift templates ----------
 
-var templateColumns = []string{"id", "name", "to_char(start_time, 'HH24:MI')", "to_char(end_time, 'HH24:MI')", "auto_close", "sort"}
+var templateColumns = []string{"id", "name", "to_char(start_time, 'HH24:MI')", "to_char(end_time, 'HH24:MI')", "auto_close", "sort", "breaks::text"}
 
 func scanTemplate(row interface{ Scan(...any) error }) (dto.ShiftTemplate, error) {
 	var t dto.ShiftTemplate
-	err := row.Scan(&t.ID, &t.Name, &t.StartTime, &t.EndTime, &t.AutoClose, &t.Sort)
-	return t, err
+	var breaks string
+	if err := row.Scan(&t.ID, &t.Name, &t.StartTime, &t.EndTime, &t.AutoClose, &t.Sort, &breaks); err != nil {
+		return t, err
+	}
+	t.Breaks = BreaksOf(breaks)
+	return t, nil
 }
 
 func (r *driverRepository) GetTemplates(ctx context.Context) ([]dto.ShiftTemplate, error) {
@@ -269,6 +273,7 @@ func (r *driverRepository) CreateTemplate(ctx context.Context, body dto.UpsertSh
 		Set("end_time", body.EndTime).
 		Set("auto_close", enabledOf(body.AutoClose)).
 		Set("sort", body.Sort).
+		Set("breaks", BreaksJSON(body.Breaks)).
 		SetCreatedBy(createdBy).
 		QueryRowContext(ctx, r.db).Scan(&id)
 	return id, err
@@ -281,6 +286,7 @@ func (r *driverRepository) UpdateTemplate(ctx context.Context, id string, body d
 		Set("end_time", body.EndTime).
 		Set("auto_close", enabledOf(body.AutoClose)).
 		Set("sort", body.Sort).
+		Set("breaks", BreaksJSON(body.Breaks)).
 		SetUpdatedBy(updatedBy).
 		Where("id = $1", id).
 		Where("deleted_at IS NULL").

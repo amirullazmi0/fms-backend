@@ -28,13 +28,22 @@ type DriverLast struct {
 	RouteID string `json:"routeId"`
 }
 
+// ShiftBreak: istirahat terjadwal (P2-3). Selama jam ini unit yang bertugas otomatis berstatus
+// standby terencana dengan delay code Code (mis. ISHOMA); End lebih awal dari Start = lewat tengah malam.
+type ShiftBreak struct {
+	Start string `json:"start" validate:"required,hhmm"`
+	End   string `json:"end" validate:"required,hhmm,nefield=Start"`
+	Code  string `json:"code" validate:"required,max=20"`
+}
+
 type ShiftTemplate struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	StartTime string `json:"startTime"` // HH:MM
-	EndTime   string `json:"endTime"`   // HH:MM (earlier than start = past midnight)
-	AutoClose bool   `json:"autoClose"`
-	Sort      int    `json:"sort"`
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	StartTime string       `json:"startTime"` // HH:MM
+	EndTime   string       `json:"endTime"`   // HH:MM (earlier than start = past midnight)
+	AutoClose bool         `json:"autoClose"`
+	Sort      int          `json:"sort"`
+	Breaks    []ShiftBreak `json:"breaks"`
 }
 
 type UpsertShiftTemplateRequest struct {
@@ -43,6 +52,7 @@ type UpsertShiftTemplateRequest struct {
 	EndTime   string `json:"endTime" validate:"required,hhmm,nefield=StartTime"`
 	AutoClose *bool  `json:"autoClose"`
 	Sort      int    `json:"sort"`
+	Breaks    []ShiftBreak `json:"breaks" validate:"omitempty,max=8,dive"`
 }
 
 type Assignment struct {
@@ -72,6 +82,7 @@ type Shift struct {
 	Note         *string      `json:"note"`
 	Overdue      bool         `json:"overdue"`
 	Assignments  []Assignment `json:"assignments"`
+	Breaks       []ShiftBreak `json:"breaks"`
 	CreatedAt    int64        `json:"createdAt"`
 	UpdatedAt    int64        `json:"updatedAt"`
 
@@ -91,6 +102,7 @@ type CreateShiftRequest struct {
 	PlannedEnd   int64   `json:"plannedEnd" validate:"required,gtfield=PlannedStart"`
 	AutoClose    *bool   `json:"autoClose"`
 	Note         *string `json:"note" validate:"omitempty,max=200"`
+	Breaks       []ShiftBreak `json:"breaks" validate:"omitempty,max=8,dive"`
 }
 
 // UpdateShiftRequest is a partial update: nil fields keep their value.
@@ -102,6 +114,7 @@ type UpdateShiftRequest struct {
 	PlannedEnd   *int64  `json:"plannedEnd"`
 	AutoClose    *bool   `json:"autoClose"`
 	Note         *string `json:"note" validate:"omitempty,max=200"`
+	Breaks       *[]ShiftBreak `json:"breaks" validate:"omitempty,max=8,dive"`
 }
 
 // ShiftInput is a fully resolved shift row to write.
@@ -113,6 +126,7 @@ type ShiftInput struct {
 	PlannedEnd   int64
 	AutoClose    bool
 	Note         *string
+	Breaks       []ShiftBreak
 }
 
 type ShiftListQuery struct {

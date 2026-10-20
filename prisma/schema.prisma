@@ -318,6 +318,8 @@ model ShiftTemplate {
   endTime   DateTime  @map("end_time") @db.Time(0)
   autoClose Boolean   @default(true) @map("auto_close")
   sort      Int       @default(0)
+  /// Istirahat terjadwal: [{start, end, code}] (HH:MM, delay code standby terencana).
+  breaks    Json      @default("[]")
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
@@ -336,6 +338,8 @@ model Shift {
   plannedStart DateTime          @map("planned_start") @db.Timestamptz(3)
   plannedEnd   DateTime          @map("planned_end") @db.Timestamptz(3)
   autoClose    Boolean           @default(true) @map("auto_close")
+  /// Salinan istirahat dari template saat shift dibuat.
+  breaks       Json              @default("[]")
   status       ShiftStatus       @default(planned)
   startedAt    DateTime?         @map("started_at") @db.Timestamptz(3)
   closedAt     DateTime?         @map("closed_at") @db.Timestamptz(3)

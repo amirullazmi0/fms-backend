@@ -1,5 +1,5 @@
--- Operator menjadi user. users.user_type: staff (login dashboard pakai email + password) atau
--- operator (login MDT memakai NIK + PIN, tidak memiliki email / password).
+-- Operator / driver jadi user. users.user_type: staff (login dashboard pakai email + password) atau
+-- operator (login MDT pakai NIK + PIN, nggak punya email / password).
 -- Baris drivers disalin ke users dengan id yang SAMA, jadi assignments / trips / site_visits /
 -- unit_status_logs tetap nyambung; FK driver_id dipindah ke users. Tabel lama disimpan sebagai
 -- drivers_legacy (cadangan, dihapus di migrasi berikutnya setelah dicek).
@@ -15,7 +15,7 @@ ALTER TABLE "users" ADD COLUMN "note" TEXT;
 ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL;
 ALTER TABLE "users" ALTER COLUMN "password_hash" DROP NOT NULL;
 
--- Staff wajib email + password; operator tidak boleh memiliki password (tidak dapat login ke dashboard).
+-- Staff wajib email + password; operator nggak boleh punya password (nggak bisa login dashboard).
 ALTER TABLE "users" ADD CONSTRAINT "users_staff_login" CHECK (
     ("user_type" = 'staff' AND "email" IS NOT NULL AND "password_hash" IS NOT NULL)
     OR ("user_type" = 'operator' AND "password_hash" IS NULL)

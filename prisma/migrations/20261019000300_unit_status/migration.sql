@@ -19,7 +19,7 @@ CREATE TABLE "delay_codes" (
     CONSTRAINT "delay_codes_pkey" PRIMARY KEY ("code")
 );
 
--- id dibuat di tablet MDT (uuid) supaya kiriman ulang dari antrean offline tidak tercatat ganda.
+-- id dibuat di tablet MDT (uuid) supaya kiriman ulang dari antrean offline nggak dobel.
 CREATE TABLE "unit_status_logs" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "imei" TEXT NOT NULL,

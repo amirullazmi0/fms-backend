@@ -34,7 +34,7 @@ var tripCols = []string{
 	"assignment_id", "shift_id", "driver_id", "imei", "route_id", "route_name", "loading_site_id", "loading_name",
 	"unloading_site_id", "unloading_name", "depart_at", "arrive_at", "duration_ms", "distance_m", "moving_ms", "stops",
 	"stopped_ms", "max_speed", "avg_speed", "fuel_unit", "fuel_at_loading", "fuel_at_unloading", "fuel_used",
-	"load_dwell_ms", "unload_dwell_ms", "status", "leg",
+	"load_dwell_ms", "unload_dwell_ms", "payload_ton", "status", "leg",
 }
 
 func (r *tripRepository) ReplaceTrips(ctx context.Context, assignmentID string, trips []dto.TripUpsert) (int, error) {
@@ -67,7 +67,8 @@ func (r *tripRepository) ReplaceTrips(ctx context.Context, assignmentID string, 
 	upsert := " ON CONFLICT (imei, depart_at) DO UPDATE SET " + strings.Join(sets, ", ") + `, computed_at = CURRENT_TIMESTAMP
 		WHERE trips.status IS DISTINCT FROM EXCLUDED.status OR trips.arrive_at IS DISTINCT FROM EXCLUDED.arrive_at
 		   OR trips.duration_ms IS DISTINCT FROM EXCLUDED.duration_ms OR trips.assignment_id IS DISTINCT FROM EXCLUDED.assignment_id
-		   OR trips.driver_id IS DISTINCT FROM EXCLUDED.driver_id OR trips.fuel_used IS DISTINCT FROM EXCLUDED.fuel_used`
+		   OR trips.driver_id IS DISTINCT FROM EXCLUDED.driver_id OR trips.fuel_used IS DISTINCT FROM EXCLUDED.fuel_used
+		   OR trips.payload_ton IS DISTINCT FROM EXCLUDED.payload_ton`
 
 	for _, t := range trips {
 		var unloadDwell any
@@ -100,6 +101,7 @@ func (r *tripRepository) ReplaceTrips(ctx context.Context, assignmentID string, 
 			Set("fuel_used", t.FuelUsed).
 			Set("load_dwell_ms", t.LoadDwellMs).
 			Set("unload_dwell_ms", unloadDwell).
+			Set("payload_ton", t.PayloadTon).
 			Set("status", t.Status).
 			Set("leg", t.Leg).
 			WithoutReturning().
@@ -120,7 +122,7 @@ func (r *tripRepository) ReplaceTrips(ctx context.Context, assignmentID string, 
 // fromTrips is trips joined with their driver, shift and truck names.
 func fromTrips() *database.QueryBuilder {
 	return database.NewQueryBuilder("trips t").
-		LeftJoin("drivers d", "d.id = t.driver_id").
+		LeftJoin("users d", "d.id = t.driver_id").
 		LeftJoin("shifts s", "s.id = t.shift_id").
 		LeftJoin("devices v", "v.imei = t.imei")
 }
@@ -150,7 +152,7 @@ var tripRecordColumns = []string{
 	"COALESCE(v.plate, v.name, t.imei)", "t.route_id", "t.route_name", "t.leg::text", "t.loading_name", "t.unloading_name",
 	"t.depart_at", "t.arrive_at", "t.duration_ms", "t.distance_m", "t.moving_ms", "t.stops", "t.stopped_ms", "t.max_speed",
 	"t.avg_speed", "t.fuel_unit", "t.fuel_at_loading", "t.fuel_at_unloading", "t.fuel_used", "t.load_dwell_ms",
-	"t.unload_dwell_ms", "t.status::text",
+	"t.unload_dwell_ms", "t.payload_ton", "t.status::text",
 }
 
 func (r *tripRepository) ListTrips(ctx context.Context, f dto.TripFilter, limit, offset int) ([]dto.TripRecord, int, error) {
@@ -174,12 +176,12 @@ func (r *tripRepository) ListTrips(ctx context.Context, f dto.TripFilter, limit,
 		var assignment, shift, shiftName, shiftDate, driver, driverName, truck, route, fuelUnit sql.NullString
 		var depart time.Time
 		var arrive sql.NullTime
-		var fuelLoad, fuelUnload, fuelUsed sql.NullFloat64
+		var fuelLoad, fuelUnload, fuelUsed, payload sql.NullFloat64
 		var unloadDwell sql.NullInt64
 		if err := rows.Scan(&t.ID, &assignment, &shift, &shiftName, &shiftDate, &driver, &driverName, &t.Imei, &truck, &route,
 			&t.RouteName, &t.Leg, &t.LoadingName, &t.UnloadingName, &depart, &arrive, &t.DurationMs, &t.Distance, &t.MovingMs,
 			&t.Stops, &t.StoppedMs, &t.MaxSpeed, &t.AvgSpeed, &fuelUnit, &fuelLoad, &fuelUnload, &fuelUsed, &t.LoadDwellMs,
-			&unloadDwell, &t.Status); err != nil {
+			&unloadDwell, &payload, &t.Status); err != nil {
 			return nil, 0, err
 		}
 		t.AssignmentID, t.ShiftID, t.ShiftName, t.ShiftDate = database.NullString(assignment), database.NullString(shift), database.NullString(shiftName), database.NullString(shiftDate)
@@ -187,6 +189,7 @@ func (r *tripRepository) ListTrips(ctx context.Context, f dto.TripFilter, limit,
 		t.DepartAt, t.ArriveAt = database.Ms(depart), database.NullMs(arrive)
 		t.FuelAtLoading, t.FuelAtUnloading, t.FuelUsed = database.NullFloat(fuelLoad), database.NullFloat(fuelUnload), database.NullFloat(fuelUsed)
 		t.UnloadDwellMs = database.NullInt(unloadDwell)
+		t.PayloadTon = database.NullFloat(payload)
 		out = append(out, t)
 	}
 	return out, total, rows.Err()
@@ -199,10 +202,12 @@ type groupSQL struct {
 // $TZ is replaced with the report time zone (per-day grouping only).
 var reportGroups = map[string]groupSQL{
 	"route":  {"COALESCE(t.route_id::text, t.route_name)", "MAX(t.route_name)", "MAX(t.loading_name || ' → ' || t.unloading_name)", "label"},
-	"driver": {"COALESCE(t.driver_id::text, '-')", "COALESCE(MAX(d.name), 'Tanpa driver')", "MAX(d.employee_no)", "label"},
+	"driver": {"COALESCE(t.driver_id::text, '-')", "COALESCE(MAX(d.name), 'Tanpa operator')", "MAX(d.employee_no)", "label"},
 	"truck":  {"t.imei", "MAX(COALESCE(v.plate, v.name, t.imei))", "MAX(v.vehicle)", "label"},
 	"shift":  {"COALESCE(t.shift_id::text, '-')", "COALESCE(MAX(s.name), 'Tanpa shift')", "MAX(to_char(s.date, 'YYYY-MM-DD'))", "sub DESC, label"},
 	"day":    {"to_char(t.depart_at AT TIME ZONE $TZ, 'YYYY-MM-DD')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'YYYY-MM-DD')", "NULL", "label DESC"},
+	// Per jam (waktu GPS berangkat dari loading), key = "YYYY-MM-DD HH".
+	"hour": {"to_char(t.depart_at AT TIME ZONE $TZ, 'YYYY-MM-DD HH24')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'HH24:00')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'YYYY-MM-DD')", "key"},
 }
 
 // Ritase & duration = the way out (go). The way back is counted apart. Distance, stops, total fuel = both ways.
@@ -229,6 +234,10 @@ var aggColumns = []string{
 	"AVG(t.fuel_used) FILTER (WHERE " + legGo + " AND t.status = 'done')::float",
 	"AVG(t.fuel_at_loading) FILTER (WHERE " + legGo + " AND t.status = 'done')::float",
 	"AVG(t.fuel_at_unloading) FILTER (WHERE " + legGo + " AND t.status = 'done')::float",
+	// Tonase: ritase yang sampai unloading × truck factor (trip lama tanpa snapshot pakai payload unit sekarang).
+	"COALESCE(SUM(COALESCE(t.payload_ton, v.payload_ton)) FILTER (WHERE " + legGo + " AND t.status = 'done'), 0)::float",
+	// Waktu siklus: dua arah + waktu di loading/unloading (ritase selesai).
+	"COALESCE(SUM(t.duration_ms + t.load_dwell_ms) FILTER (WHERE t.status = 'done'), 0)::float",
 }
 
 func r1(f sql.NullFloat64) *float64 {
@@ -245,8 +254,11 @@ func scanReportRow(row interface{ Scan(...any) error }) (dto.ReportRow, error) {
 	var fuelUsed, avgFuel, avgLoad, avgUnload sql.NullFloat64
 	if err := row.Scan(&x.Key, &x.Label, &sub, &x.Trips, &x.Done, &x.AvgDurationMs, &x.MinDurationMs, &x.MaxDurationMs,
 		&x.BackDone, &x.BackAvgMs, &x.BackMinMs, &x.BackMaxMs, &x.Distance, &x.Stops, &x.StoppedMs,
-		&fuelUnit, &fuelUsed, &avgFuel, &avgLoad, &avgUnload); err != nil {
+		&fuelUnit, &fuelUsed, &avgFuel, &avgLoad, &avgUnload, &x.Ton, &x.CycleMs); err != nil {
 		return x, err
+	}
+	if x.CycleMs > 0 {
+		x.TonPerHour = math.Floor(x.Ton/(x.CycleMs/3_600_000)*10+0.5) / 10
 	}
 	x.Sub, x.FuelUnit = database.NullString(sub), database.NullString(fuelUnit)
 	x.FuelUsed, x.AvgFuel, x.AvgFuelAtLoading, x.AvgFuelAtUnloading = r1(fuelUsed), r1(avgFuel), r1(avgLoad), r1(avgUnload)

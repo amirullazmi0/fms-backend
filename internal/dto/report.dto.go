@@ -31,7 +31,8 @@ type TripRecord struct {
 	FuelUsed        *float64 `json:"fuelUsed"`
 	LoadDwellMs     int64    `json:"loadDwellMs"`
 	UnloadDwellMs   *int64   `json:"unloadDwellMs"`
-	Status          string   `json:"status"` // done | unfinished
+	PayloadTon      *float64 `json:"payloadTon"` // ton carried (go leg); nil on the way back
+	Status          string   `json:"status"`     // done | unfinished
 }
 
 // TripUpsert is one computed ritase to store for an assignment.
@@ -62,6 +63,7 @@ type TripUpsert struct {
 	FuelUsed        *float64
 	LoadDwellMs     int64
 	UnloadDwellMs   *int64
+	PayloadTon      *float64 // go leg: the unit's truck factor; back: nil (empty)
 	Status          string
 }
 
@@ -86,6 +88,12 @@ type ReportRow struct {
 	AvgFuel            *float64 `json:"avgFuel"`
 	AvgFuelAtLoading   *float64 `json:"avgFuelAtLoading"`
 	AvgFuelAtUnloading *float64 `json:"avgFuelAtUnloading"`
+	// Ton: tonase = Σ payload of finished go ritase.
+	Ton float64 `json:"ton"`
+	// CycleMs: time in the cycle (both legs + time at loading/unloading), the working hour base.
+	CycleMs float64 `json:"cycleMs"`
+	// TonPerHour: productivity = Ton ÷ CycleMs (hours). 0 when no cycle time yet.
+	TonPerHour float64 `json:"tonPerHour"`
 }
 
 type Report struct {
@@ -100,7 +108,7 @@ type Report struct {
 type ReportQuery struct {
 	From   int64  `form:"from"`
 	To     int64  `form:"to"`
-	Group  string `form:"group" validate:"omitempty,oneof=route driver truck shift day"`
+	Group  string `form:"group" validate:"omitempty,oneof=route driver truck shift day hour"`
 	Route  string `form:"route" validate:"omitempty,uuid"`
 	Driver string `form:"driver" validate:"omitempty,uuid"`
 	Shift  string `form:"shift" validate:"omitempty,uuid"`
@@ -133,6 +141,10 @@ type SiteVisitUpsert struct {
 	DepartAt     *int64 // nil = still inside
 	DwellMs      int64
 	Finished     bool // still inside when the shift ended (status finished)
+	// Stages (analytics.SplitVisit): queue, spot (nil = site has no spot zone), work.
+	QueueMs int64
+	SpotMs  *int64
+	WorkMs  int64
 }
 
 // DwellStats: time spent at one kind of site in the period.

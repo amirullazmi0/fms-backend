@@ -32,9 +32,11 @@ func NewVisitRepository(db *sql.DB) VisitRepository {
 }
 
 func (r *visitRepository) CloseStale(ctx context.Context) (int, error) {
+	// A unit still dumping its last ritase after the shift closed keeps its stay "inside" until it leaves.
 	res, err := database.RawExecContext(ctx, r.db, `UPDATE site_visits v SET status = 'finished', computed_at = CURRENT_TIMESTAMP
-		FROM assignments a JOIN shifts s ON s.id = a.shift_id
-		WHERE a.id = v.assignment_id AND v.status = 'inside' AND (s.status = 'closed' OR a.end_at IS NOT NULL)`)
+		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id
+		WHERE a.id = v.assignment_id AND v.status = 'inside' AND (a.end_at IS NOT NULL OR (sh.status = 'closed'
+			AND NOT (v.role = 'unloading' AND sh.closed_at > now() - interval '6 hours' AND `+FinishingTrip+`)))`)
 	if err != nil {
 		return 0, err
 	}

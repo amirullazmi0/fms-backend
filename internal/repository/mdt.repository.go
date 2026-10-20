@@ -357,21 +357,23 @@ func (r *mdtRepository) Duty(ctx context.Context, imei string) (*dto.MdtDuty, er
 	var started sql.NullTime
 	var rit, ton sql.NullFloat64
 	var loading, unloading []byte
-	err := database.RawQueryRowContext(ctx, r.db, `SELECT a.id, s.id, s.name, s.status::text, s.planned_start, s.planned_end, s.started_at,
+	err := database.RawQueryRowContext(ctx, r.db, `SELECT a.id, sh.id, sh.name, CASE WHEN sh.status = 'closed' THEN 'finishing' ELSE sh.status::text END, sh.planned_start, sh.planned_end, sh.started_at,
 			r.id, r.name, ls.name, us.name, d.id, COALESCE(d.name, ''),
-			(SELECT t.rit_per_shift FROM production_targets t WHERE t.route_id = r.id AND t.deleted_at IS NULL AND t.valid_from <= s.date
+			(SELECT t.rit_per_shift FROM production_targets t WHERE t.route_id = r.id AND t.deleted_at IS NULL AND t.valid_from <= sh.date
 				ORDER BY t.valid_from DESC LIMIT 1),
-			(SELECT t.ton_per_shift FROM production_targets t WHERE t.route_id = r.id AND t.deleted_at IS NULL AND t.valid_from <= s.date
+			(SELECT t.ton_per_shift FROM production_targets t WHERE t.route_id = r.id AND t.deleted_at IS NULL AND t.valid_from <= sh.date
 				ORDER BY t.valid_from DESC LIMIT 1),
 			`+mdtSiteJSON("ls")+`, `+mdtSiteJSON("us")+`
 		FROM assignments a
-		JOIN shifts s ON s.id = a.shift_id AND s.deleted_at IS NULL AND s.status IN ('active', 'planned')
+		JOIN shifts sh ON sh.id = a.shift_id AND sh.deleted_at IS NULL
 		JOIN routes r ON r.id = a.route_id
 		JOIN sites ls ON ls.id = r.loading_site_id
 		JOIN sites us ON us.id = r.unloading_site_id
 		JOIN users d ON d.id = a.driver_id
-		WHERE a.imei = $1 AND a.end_at IS NULL AND (s.status = 'active' OR s.planned_end > now())
-		ORDER BY (s.status = 'active') DESC, s.planned_start
+		WHERE a.imei = $1 AND a.end_at IS NULL AND (sh.status = 'active' OR (sh.status = 'planned' AND sh.planned_end > now())
+			-- Shift ditutup tetapi ritase terakhir belum selesai (masih hauling / dumping): selesaikan dulu.
+			OR (sh.status = 'closed' AND sh.closed_at > now() - interval '6 hours' AND `+FinishingTrip+`))
+		ORDER BY (sh.status = 'active') DESC, (sh.status = 'closed') DESC, sh.planned_start
 		LIMIT 1`, imei).Scan(&d.AssignmentID, &d.ShiftID, &d.ShiftName, &d.ShiftStatus, &ps, &pe, &started,
 		&d.RouteID, &d.RouteName, &d.LoadingName, &d.UnloadingName, &d.DriverID, &d.DriverName, &rit, &ton, &loading, &unloading)
 	if errors.Is(err, sql.ErrNoRows) {

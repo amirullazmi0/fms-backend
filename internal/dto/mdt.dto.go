@@ -141,7 +141,7 @@ type MdtDuty struct {
 	AssignmentID  string   `json:"assignmentId"`
 	ShiftID       string   `json:"shiftId"`
 	ShiftName     string   `json:"shiftName"`
-	ShiftStatus   string   `json:"shiftStatus"` // planned | active
+	ShiftStatus   string   `json:"shiftStatus"` // planned | active | finishing (shift ditutup, ritase terakhir belum selesai)
 	PlannedStart  int64    `json:"plannedStart"`
 	PlannedEnd    int64    `json:"plannedEnd"`
 	StartedAt     *int64   `json:"startedAt"`

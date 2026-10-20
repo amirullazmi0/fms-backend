@@ -13,11 +13,15 @@ import (
 	"github.com/lib/pq"
 )
 
-// FinishingTrip: the assignment's last trip left loading before the shift closed and has not
-// reached unloading yet. The truck finishes that ritase (max 6 h, the scheduler's late-arrival
-// window), then it is done. Shared with the simulator (pkg/simulator).
-const FinishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go' AND t.arrive_at IS NULL
-	AND t.depart_at <= sh.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id))`
+// FinishingTrip: the assignment's last ritase left front loading before the shift closed and is not
+// finished yet: still hauling to dumping, or already at dumping but not done dumping (has not left
+// the dumping radius). The unit finishes that ritase including dumping (max 6 h, the scheduler's
+// late-arrival window), then it is done. Mirrored in the simulator (pkg/simulator).
+// Aliases: a = assignment, sh = its (closed) shift.
+const FinishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go'
+	AND t.depart_at <= sh.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id)
+	AND (t.arrive_at IS NULL OR EXISTS (SELECT 1 FROM site_visits sv WHERE sv.assignment_id = a.id
+		AND sv.site_id = t.unloading_site_id AND sv.arrive_at >= t.depart_at AND sv.depart_at IS NULL)))`
 
 // onDuty = what trucks are working on: an active shift (phase active), or a closed shift whose
 // last ritase is still heading to unloading (phase finishing).

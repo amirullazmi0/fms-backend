@@ -61,6 +61,9 @@ const (
 	maxBatch = 50
 	// queueGapM: in queue mode, a truck waits this far before a spot another truck is using.
 	queueGapM = 60
+	// exitDumpM: after the last dumping of a stopped shift, park this far from the dumping point
+	// (outside its radius, so the departure is recorded).
+	exitDumpM = 400
 )
 
 // spots: loading / dumping positions in use (queue mode). key = point, value = imei.
@@ -205,6 +208,7 @@ type fakeDevice struct {
 	parkTicks  int
 	depotTicks int
 	finish     bool    // shift stopped: stop after the next unloading
+	exitFrom   *latLng // last dumping done: drive out of its radius, then park
 	odometer   float64 // metres
 	trip       float64
 	fuel       float64 // 0.1 L
@@ -384,18 +388,25 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 			d.releaseSpot()
 		}
 		if d.depotTicks == 0 && d.finish && d.seg == d.path.unload {
-			// Last unloading of a stopped shift: park here (routeKey kept, so the same route
-			// is not started again on the next sync).
-			d.here, d.path, d.ign, d.door = d.path.points[d.seg], nil, false, 0
-			d.logf("ritase terakhir selesai di dumping, parkir")
-			d.speed = 0
-			return nil
+			// Last unloading of a stopped shift: leave the dumping area (so the departure is
+			// recorded and the ritase counts as finished), then park.
+			at := d.path.points[d.seg]
+			d.exitFrom = &at
+			d.logf("dumping terakhir selesai, keluar dari area dumping")
 		}
 		if d.depotTicks > 2 {
 			d.door = 1
 		} else {
 			d.door = 0
 		}
+		d.speed = 0
+		return nil
+	}
+	if d.exitFrom != nil && distM(d.position(), *d.exitFrom) > exitDumpM {
+		// Out of the dumping area after the last ritase: park here (routeKey kept, so the same
+		// route is not started again on the next sync).
+		d.here, d.path, d.exitFrom, d.ign, d.door = d.position(), nil, nil, false, 0
+		d.logf("ritase terakhir selesai, parkir di luar area dumping")
 		d.speed = 0
 		return nil
 	}
@@ -713,9 +724,11 @@ func (d *fakeDevice) session(ctx context.Context) {
 }
 
 // finishingTrip mirrors repository.FinishingTrip (s = the closed shift): the assignment's last
-// trip left loading before the close and has not reached unloading yet.
-const finishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go' AND t.arrive_at IS NULL
-	AND t.depart_at <= s.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id))`
+// ritase left front loading before the close and is not finished yet (still hauling, or still at dumping).
+const finishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go'
+	AND t.depart_at <= s.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id)
+	AND (t.arrive_at IS NULL OR EXISTS (SELECT 1 FROM site_visits sv WHERE sv.assignment_id = a.id
+		AND sv.site_id = t.unloading_site_id AND sv.arrive_at >= t.depart_at AND sv.depart_at IS NULL)))`
 
 // syncRoutes reads each simulated truck's route from the active shift assignments.
 func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {

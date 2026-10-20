@@ -230,12 +230,14 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 	if err != nil || s.visits == nil {
 		return changed, err
 	}
-	// The ritase still on its way when the shift stopped: its arrival at unloading belongs here.
+	// The last ritase that left front loading before the end: its stay at dumping belongs here,
+	// even when it arrives or is still dumping after the shift stopped.
 	var lastArrival *int64
+	var lastStart int64
 	for _, t := range rep.Trips {
-		if t.Leg == "go" && t.Start < end && t.Unloading != nil && t.Unloading.Arrive >= end {
+		if t.Leg == "go" && t.Start < end && t.Unloading != nil && (lastArrival == nil || t.Start > lastStart) {
 			arr := t.Unloading.Arrive
-			lastArrival = &arr
+			lastArrival, lastStart = &arr, t.Start
 		}
 	}
 	n, err := s.visits.ReplaceVisits(ctx, a.ID, visitsOf(records, shift, a, route, sites, start, end, lastArrival))
@@ -269,8 +271,9 @@ func visitsOf(records []dto.AvlRecord, shift dto.Shift, a dto.Assignment, route 
 		out = append(out, dto.SiteVisitUpsert{
 			AssignmentID: a.ID, ShiftID: shift.ID, DriverID: a.DriverID, Imei: a.Imei, RouteID: route.ID,
 			SiteID: v.SiteID, SiteName: v.Name, Role: role, ArriveAt: v.Arrive, DepartAt: v.Depart, DwellMs: v.DwellMs,
-			// Still there when the shift is over: the truck is done ("Selesai"), not waiting.
-			Finished: closed && v.Depart == nil,
+			// Still there when the shift is over: the unit is done ("Selesai"), not waiting. Except the
+			// final dumping of the last ritase: it stays "inside" until the unit leaves dumping.
+			Finished: closed && v.Depart == nil && !finalStop,
 			QueueMs:  st.QueueMs, SpotMs: st.SpotMs, WorkMs: st.WorkMs,
 		})
 	}

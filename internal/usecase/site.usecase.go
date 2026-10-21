@@ -138,7 +138,7 @@ func (u *siteUsecase) checkRouteSites(ctx context.Context, body dto.UpsertRouteR
 		return nil, nil, apperror.BadRequest("Nama rute wajib diisi")
 	}
 	if body.LoadingID == body.UnloadingID {
-		return nil, nil, apperror.BadRequest("Front loading dan dumping harus beda")
+		return nil, nil, apperror.BadRequest("Pit dan stockpile / jetty harus beda")
 	}
 	found, err := u.siteRepo.SitesByIDs(ctx, []string{body.LoadingID, body.UnloadingID}, false)
 	if err != nil {
@@ -153,10 +153,10 @@ func (u *siteUsecase) checkRouteSites(ctx context.Context, body dto.UpsertRouteR
 		}
 	}
 	if loading == nil {
-		return nil, nil, apperror.BadRequest("Pilih front loading")
+		return nil, nil, apperror.BadRequest("Pilih pit")
 	}
 	if unloading == nil {
-		return nil, nil, apperror.BadRequest("Pilih titik dumping")
+		return nil, nil, apperror.BadRequest("Pilih stockpile / jetty")
 	}
 	return loading, unloading, nil
 }

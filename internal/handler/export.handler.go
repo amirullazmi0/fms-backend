@@ -77,8 +77,8 @@ func (h *ExportHandler) Export(c *gin.Context) {
 	switch q.Type {
 	case "ritase":
 		s := sheet{name: "Ritase", header: []string{"Berangkat", "Tiba", "Tanggal shift", "Shift", "Rute", "Arah", "Unit", "Operator",
-			"Front loading", "Dumping", "Durasi (mnt)", "Jarak (km)", "Berhenti", "Kecepatan maks", "Kecepatan rata-rata",
-			"Lama di front (mnt)", "Lama di dumping (mnt)", "Tonase (t)", "BBM terpakai", "Status"}}
+			"Pit", "Stockpile / jetty", "Durasi (mnt)", "Jarak (km)", "Berhenti", "Kecepatan maks", "Kecepatan rata-rata",
+			"Lama di pit (mnt)", "Lama di stockpile / jetty (mnt)", "Tonase (t)", "BBM terpakai", "Status"}}
 		for offset := 0; offset < maxExportTrips; offset += 2000 {
 			q.Limit, q.Offset = 2000, offset
 			list, total, err := h.shift.ReportTrips(ctx, q.ReportQuery)

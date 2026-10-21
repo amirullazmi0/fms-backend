@@ -146,10 +146,10 @@ func routePath(ctx context.Context, key, name string, from, l, u latLng) (*path,
 			if a.err == nil {
 				gol = coords(a.r)
 			} else {
-				logf("[%s] jalur ke front loading gagal (%v), mulai dari front loading", name, a.err)
+				logf("[%s] jalur ke pit gagal (%v), mulai dari pit", name, a.err)
 			}
 		case <-time.After(approachWait):
-			logf("[%s] jalur ke front loading belum terhitung, mulai dari front loading", name)
+			logf("[%s] jalur ke pit belum terhitung, mulai dari pit", name)
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -203,8 +203,8 @@ type UnitKind string
 
 const (
 	DT      UnitKind = "DT"      // dump truck: hauls its shift route
-	EX      UnitKind = "EX"      // excavator: works at front loading
-	LV      UnitKind = "LV"      // light vehicle: drives between front loading and dumping
+	EX      UnitKind = "EX"      // excavator: works at pit
+	LV      UnitKind = "LV"      // light vehicle: drives between pit and dumping
 	SUPPORT UnitKind = "SUPPORT" // grader / water truck: drives the haul road slowly
 )
 
@@ -222,7 +222,7 @@ type fakeDevice struct {
 	mu         sync.Mutex
 	imei       string
 	kind       UnitKind
-	working    bool // EX: at front loading, engine on
+	working    bool // EX: at pit, engine on
 	heading    int  // EX: swing direction
 	path       *path // nil = parked (no route)
 	here       latLng
@@ -305,14 +305,14 @@ func (d *fakeDevice) setSite(r *routeInfo) {
 	d.routeKey = key
 	if r == nil {
 		d.working, d.ign, d.speed = false, false, 0
-		d.logf("tidak ada front loading, parkir di tempat")
+		d.logf("tidak ada pit, parkir di tempat")
 		return
 	}
 	n, _ := strconv.Atoi(d.imei[len(d.imei)-3:])
 	deg := (n * 137) % 360 // stable per unit
 	d.here = latLng{r.l[0] + 0.0002*math.Cos(rad(float64(deg))), r.l[1] + 0.0002*math.Sin(rad(float64(deg)))}
 	d.working, d.ign, d.heading = true, true, deg
-	d.logf("bekerja di front loading rute %q", r.name)
+	d.logf("bekerja di pit rute %q", r.name)
 }
 
 func (d *fakeDevice) logf(format string, args ...any) {
@@ -396,7 +396,7 @@ func (d *fakeDevice) setRoute(ctx context.Context, r *routeInfo) {
 	for i := 1; i <= p.loopFrom; i++ {
 		toLoad += distM(p.points[i-1], p.points[i])
 	}
-	d.logf("menuju front loading (%.1f km melalui jalan)", toLoad/1000)
+	d.logf("menuju pit (%.1f km melalui jalan)", toLoad/1000)
 	d.seg, d.frac, d.depotTicks = 0, 0, 0
 }
 
@@ -494,7 +494,7 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 			// recorded and the ritase counts as finished), then park.
 			at := d.path.points[d.seg]
 			d.exitFrom = &at
-			d.logf("dumping terakhir selesai, keluar dari area dumping")
+			d.logf("dumping terakhir selesai, keluar dari area stockpile / jetty")
 		}
 		if d.depotTicks > 2 && d.kind == DT {
 			d.door = 1 // tipper
@@ -508,7 +508,7 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 		// Out of the dumping area after the last ritase: park here (routeKey kept, so the same
 		// route is not started again on the next sync).
 		d.here, d.path, d.exitFrom, d.ign, d.door = d.position(), nil, nil, false, 0
-		d.logf("ritase terakhir selesai, parkir di luar area dumping")
+		d.logf("ritase terakhir selesai, parkir di luar area stockpile / jetty")
 		d.speed = 0
 		return nil
 	}

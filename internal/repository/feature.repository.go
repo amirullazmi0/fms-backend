@@ -82,7 +82,12 @@ func (r *featureRepository) Update(ctx context.Context, key string, enabled *boo
 	if config != nil {
 		ub.Set("config", string(config))
 	}
-	res, err := ub.SetUpdatedBy(updatedBy).
+	if updatedBy != "" {
+		ub.SetUpdatedBy(updatedBy)
+	} else {
+		ub.SetRaw("updated_at", "CURRENT_TIMESTAMP") // by the server itself
+	}
+	res, err := ub.
 		Where("key = $1", key).
 		Where("deleted_at IS NULL").
 		ExecuteContext(ctx, r.db)

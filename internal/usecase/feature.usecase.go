@@ -161,7 +161,7 @@ func (u *featureUsecase) registerUnits(ctx context.Context, units []simulator.Un
 		if req.UnitType == nil && req.Name == nil {
 			continue
 		}
-		if _, err := u.tracker.UpdateMeta(ctx, x.Imei, req, by); err != nil {
+		if _, err := u.tracker.UpdateMeta(ctx, x.Imei, req, userOf(by)); err != nil {
 			logger.Warn("simulator: gagal set jenis unit " + x.Imei + ": " + err.Error())
 		}
 	}
@@ -320,7 +320,7 @@ func (u *featureUsecase) setRunning(ctx context.Context, running bool, by string
 	if err != nil {
 		return
 	}
-	if _, err := u.repo.Update(ctx, model.FeatureSimulation, nil, raw, by); err != nil {
+	if _, err := u.repo.Update(ctx, model.FeatureSimulation, nil, raw, userOf(by)); err != nil {
 		logger.Warn("simulator: gagal menyimpan status berjalan: " + err.Error())
 	}
 }
@@ -330,10 +330,21 @@ func (u *featureUsecase) ResumeSimulation(ctx context.Context) {
 	if err != nil || f == nil || !f.Enabled || !c.Running {
 		return
 	}
-	actor := &model.Actor{ID: "system"}
+	actor := &model.Actor{ID: systemActor}
 	if _, err := u.StartSimulation(ctx, actor, &dto.StartSimulationRequest{}); err != nil {
 		logger.Warn("simulator: gagal lanjutin simulasi: " + err.Error())
 		return
 	}
 	logger.Info("Simulasi dilanjutkan otomatis (sebelumnya masih berjalan saat server berhenti)")
+}
+
+// systemActor: the simulator resumed by the server itself (no user). It is not a user UUID, so
+// updated_by stays unset for its writes (userOf).
+const systemActor = "system"
+
+func userOf(by string) string {
+	if by == systemActor {
+		return ""
+	}
+	return by
 }

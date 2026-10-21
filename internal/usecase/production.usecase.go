@@ -34,6 +34,7 @@ type ProductionUsecase interface {
 	Stages(ctx context.Context, q dto.ReportQuery) (*dto.StageReport, error)
 	Availability(ctx context.Context, q dto.AvailabilityQuery) (*dto.AvailabilityReport, error)
 	Heatmap(ctx context.Context, q dto.HeatmapQuery) (*dto.HeatmapReport, error)
+	Breakdowns(ctx context.Context, q dto.ReportQuery) (*dto.BreakdownReport, error)
 }
 
 type productionUsecase struct {

@@ -70,6 +70,7 @@ func (t *Tracker) detectEvents(d *deviceState, prevIo dto.IoMap, rec dto.AvlReco
 		t.pushEvent(dto.FleetEvent{Time: rec.Time, Imei: d.Imei, Level: level, Kind: kind, Text: text})
 	}
 	io := rec.Io
+	engineAlerts(io, prevIo, add)
 
 	if changed(io, prevIo, "239") {
 		if truthy(io["239"]) {

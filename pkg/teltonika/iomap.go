@@ -76,6 +76,7 @@ var IO = map[int]IoDef{
 	110: {Name: "CAN Fuel Rate", Group: "can", Size: 2, Scale: 0.1, Unit: "L/h"},
 	115: {Name: "CAN Engine Temperature", Group: "can", Size: 2, Scale: 0.1, Unit: "°C", Signed: true},
 	100: {Name: "CAN Program Number", Group: "can", Size: 4, Kind: "id"},
+	160: {Name: "OBD DTC Count", Group: "can", Size: 1},
 }
 
 var Groups = map[string]string{

@@ -362,6 +362,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			reports.GET("/stages", productionHandler.Stages)
 			reports.GET("/availability", productionHandler.Availability)
 			reports.GET("/heatmap", productionHandler.Heatmap)
+			reports.GET("/breakdowns", productionHandler.Breakdowns)
 			reports.GET("/overspeed", speedZoneHandler.Report)
 		}
 

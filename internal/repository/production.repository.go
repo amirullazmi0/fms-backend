@@ -33,6 +33,8 @@ type ProductionRepository interface {
 	// Heatmap / Shocks: kecepatan per sel jalan dan titik guncangan (P3-2).
 	Heatmap(ctx context.Context, from, to int64, routeID, leg string, limit int) ([]dto.HeatCell, bool, error)
 	Shocks(ctx context.Context, from, to int64, routeID string, limit int) ([]dto.ShockPoint, error)
+	// BreakdownLogs: log status breakdown dalam periode (P3-5).
+	BreakdownLogs(ctx context.Context, from, to int64) ([]dto.BreakdownLog, error)
 }
 
 type productionRepository struct {

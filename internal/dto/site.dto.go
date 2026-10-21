@@ -63,6 +63,8 @@ type OnDuty struct {
 	ClosedAt   *int64 `json:"closedAt"`
 	// UnloadingID: the stockpile / jetty the unit hauls to (null = the route's main one).
 	UnloadingID *string `json:"unloadingId,omitempty"`
+	// WorkSiteID: excavator only, where it works (null = the route's pit).
+	WorkSiteID *string `json:"workSiteId,omitempty"`
 }
 
 // Route is one loading site (pit) + one or more unloading sites (stockpile / jetty).
@@ -74,11 +76,13 @@ type Route struct {
 	// UnloadingIDs: every unloading site, the main one first. A ritase ends at any of them.
 	UnloadingIDs []string `json:"unloadingIds,omitempty"`
 	Note         *string  `json:"note"`
-	OnDuty       []OnDuty `json:"onDuty"`
-	RecentDone   []OnDuty `json:"recentDone,omitempty"` // trucks done with a shift of this route (last 12 h)
-	Imeis        []string `json:"imeis"`
-	CreatedAt    int64    `json:"createdAt"`
-	UpdatedAt    int64    `json:"updatedAt"`
+	OnDuty       []OnDuty `json:"onDuty"` // dump trucks (and LV / SUPPORT) on duty; excavators are apart
+	// Excavators: excavators assigned in a running shift of this route, with where they work.
+	Excavators []OnDuty `json:"excavators,omitempty"`
+	RecentDone []OnDuty `json:"recentDone,omitempty"` // trucks done with a shift of this route (last 12 h)
+	Imeis      []string `json:"imeis"`
+	CreatedAt  int64    `json:"createdAt"`
+	UpdatedAt  int64    `json:"updatedAt"`
 }
 
 type UpsertRouteRequest struct {

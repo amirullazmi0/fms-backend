@@ -150,7 +150,8 @@ func (s *Scheduler) log(text string) {
 
 // computeAssignment rebuilds the stored ritase of one assignment.
 func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dto.Assignment, routes map[string]dto.Route, now int64) (int, error) {
-	if shift.StartedAt == nil {
+	// An excavator loads; it drives no ritase.
+	if shift.StartedAt == nil || s.tracker.UnitType(a.Imei) == "EX" {
 		return s.trips.ReplaceTrips(ctx, a.ID, nil)
 	}
 	// Assignment window inside the shift: [start, end). Moving route/truck mid-shift ends the

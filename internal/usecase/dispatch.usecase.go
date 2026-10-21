@@ -28,7 +28,8 @@ const (
 	// Without enough data: notes say 1 ritase 22–27 min, loading a DT ±3 min.
 	defaultCycle = 25 * 60_000
 	defaultLoad  = 3 * 60_000
-	// loadersPerFleet: 1 fleet = 1 excavator (belum diisi pun dihitung 1 agar MF tetap terbaca).
+	// loadersPerFleet: tanpa excavator di pit pada shift berjalan, 1 fleet = 1 excavator (belum diisi pun
+	// dihitung 1 agar MF tetap terbaca).
 	loadersPerFleet = 1
 )
 
@@ -141,6 +142,20 @@ func (u *dispatchUsecase) Board(ctx context.Context) (*dto.DispatchBoard, error)
 		if l, ok := loaders[r.ID]; ok {
 			f.Loader = &l
 		}
+		// Excavators assigned at the pit in the running shift load this fleet (over the fleet excavator).
+		f.LoaderCount = loadersPerFleet
+		if atPit := pitExcavators(r); len(atPit) > 0 {
+			f.LoaderCount = len(atPit)
+			labels := make([]string, len(atPit))
+			for i, e := range atPit {
+				labels[i], _, _ = u.tracker.UnitInfo(e.Imei)
+			}
+			l := dto.FleetLoader{RouteID: r.ID, Imei: atPit[0].Imei, Label: strings.Join(labels, ", ")}
+			if f.Loader != nil {
+				l.ID, l.ProductivityTph, l.StartAt = f.Loader.ID, f.Loader.ProductivityTph, f.Loader.StartAt
+			}
+			f.Loader = &l
+		}
 		front := siteBy[r.LoadingID]
 		atFront := 0
 		for _, d := range r.OnDuty {
@@ -175,7 +190,7 @@ func (u *dispatchUsecase) Board(ctx context.Context) (*dto.DispatchBoard, error)
 		if f.BasisWindow == "perkiraan" && f.Loader != nil && f.Loader.ProductivityTph != nil {
 			f.LoadTimeMs = tracker.DefaultPayloadTon / *f.Loader.ProductivityTph * hourMs
 		}
-		f.MatchFactor, f.Match, f.IdealTrucks = matchFactor(f.Active, loadersPerFleet, f.LoadTimeMs, f.CycleMs)
+		f.MatchFactor, f.Match, f.IdealTrucks = matchFactor(f.Active, f.LoaderCount, f.LoadTimeMs, f.CycleMs)
 
 		if f.Loader != nil && len(f.Trucks) > 0 {
 			stays, err := u.repo.SiteStays(ctx, r.LoadingID, now-hangingWindow, now)
@@ -296,7 +311,7 @@ func suggestMoves(fleets []dto.Fleet) []dto.FleetMove {
 		all[i] = &state{f: &fleets[i], active: fleets[i].Active}
 	}
 	mfOf := func(s *state, n int) *float64 {
-		mf, _, _ := matchFactor(n, loadersPerFleet, s.f.LoadTimeMs, s.f.CycleMs)
+		mf, _, _ := matchFactor(n, max(s.f.LoaderCount, loadersPerFleet), s.f.LoadTimeMs, s.f.CycleMs)
 		return mf
 	}
 	dist := func(mf *float64) float64 {
@@ -351,6 +366,17 @@ func suggestMoves(fleets []dto.Fleet) []dto.FleetMove {
 		to.active++
 	}
 	return moves
+}
+
+// pitExcavators: excavators of the running shift working at the route's pit.
+func pitExcavators(r dto.Route) []dto.OnDuty {
+	out := []dto.OnDuty{}
+	for _, e := range r.Excavators {
+		if e.WorkSiteID == nil || *e.WorkSiteID == r.LoadingID {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // siteNames: the names of ids, joined (a route's stockpiles / jetties).

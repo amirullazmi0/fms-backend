@@ -254,6 +254,7 @@ model Site {
   loadingRoutes    Route[]   @relation("RouteLoading")
   unloadingRoutes  Route[]   @relation("RouteUnloading")
   assignmentUnloadings Assignment[] @relation("AssignmentUnloading")
+  assignmentWorkSites  Assignment[] @relation("AssignmentWorkSite")
 
   siteVisits SiteVisit[]
   zones      SiteZone[]
@@ -388,6 +389,8 @@ model Assignment {
   routeId   String    @map("route_id") @db.Uuid
   /// Stockpile / jetty tujuan unit. null = jetty utama rute.
   unloadingSiteId String? @map("unloading_site_id") @db.Uuid
+  /// Excavator: lokasi kerja (pit = null, atau stockpile / jetty rute). null untuk DT.
+  workSiteId String? @map("work_site_id") @db.Uuid
   note      String?
   startAt   DateTime? @map("start_at") @db.Timestamptz(3) // null = dari awal shift
   endAt     DateTime? @map("end_at") @db.Timestamptz(3) // null = masih berlaku
@@ -397,6 +400,7 @@ model Assignment {
   device    Device    @relation(fields: [imei], references: [imei], onDelete: Cascade, onUpdate: NoAction)
   route     Route     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   unloadingSite Site? @relation("AssignmentUnloading", fields: [unloadingSiteId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  workSite Site? @relation("AssignmentWorkSite", fields: [workSiteId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   trips     Trip[]
 
   siteVisits     SiteVisit[]

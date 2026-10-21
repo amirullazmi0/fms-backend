@@ -41,6 +41,8 @@ type Fleet struct {
 	LoadingName   string       `json:"loadingName"`
 	UnloadingName string       `json:"unloadingName"`
 	Loader        *FleetLoader `json:"loader"`
+	// LoaderCount: excavators loading at the pit (shift assignments, else the fleet excavator; min 1 for MF).
+	LoaderCount   int          `json:"loaderCount"`
 	Trucks        []FleetTruck `json:"trucks"`
 	Active        int          `json:"active"`        // DT producing now (not breakdown / standby / no data)
 	LoadTimeMs    float64      `json:"loadTimeMs"`    // waktu muat per DT (spot + muat di front)

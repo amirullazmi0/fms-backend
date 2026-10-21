@@ -63,10 +63,12 @@ type Assignment struct {
 	RouteID  string `json:"routeId"`
 	// UnloadingID: the stockpile / jetty this unit hauls to (null = the route's main one).
 	UnloadingID *string `json:"unloadingId"`
-	Note        *string `json:"note"`
-	StartAt     *int64  `json:"startAt"` // null = from shift start
-	EndAt       *int64  `json:"endAt"`   // null = valid until the shift ends
-	CreatedAt   int64   `json:"createdAt"`
+	// WorkSiteID: excavator only, where it works (null = the route's pit, or one of its jetties).
+	WorkSiteID *string `json:"workSiteId"`
+	Note       *string `json:"note"`
+	StartAt    *int64  `json:"startAt"` // null = from shift start
+	EndAt      *int64  `json:"endAt"`   // null = valid until the shift ends
+	CreatedAt  int64   `json:"createdAt"`
 }
 
 type Shift struct {
@@ -142,7 +144,9 @@ type AssignmentRequest struct {
 	RouteID  *string `json:"routeId" validate:"omitempty,uuid"`
 	// UnloadingID: stockpile / jetty of the route for this unit (null = the route's main one).
 	UnloadingID *string `json:"unloadingId" validate:"omitempty,uuid"`
-	Note        *string `json:"note" validate:"omitempty,max=200"`
+	// WorkSiteID: excavator only, the pit or a stockpile / jetty of the route (null = pit).
+	WorkSiteID *string `json:"workSiteId" validate:"omitempty,uuid"`
+	Note       *string `json:"note" validate:"omitempty,max=200"`
 }
 
 type CopyPreviousResponse struct {

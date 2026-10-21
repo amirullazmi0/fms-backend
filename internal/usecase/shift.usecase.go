@@ -443,7 +443,7 @@ func (u *shiftUsecase) addAssignment(ctx context.Context, shift *dto.Shift, a dt
 	if err := u.check(ctx, shift, a, ""); err != nil {
 		return nil, err
 	}
-	unloading, err := u.unloadingFor(ctx, routeID, a.UnloadingID)
+	unloading, work, err := u.sitesFor(ctx, routeID, a.Imei, a.UnloadingID, a.WorkSiteID)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +459,7 @@ func (u *shiftUsecase) addAssignment(ctx context.Context, shift *dto.Shift, a dt
 			}
 		}
 	}
-	return u.shiftRepo.InsertAssignment(ctx, shift.ID, a.DriverID, a.Imei, routeID, unloading, trimmed(a.Note), startAt)
+	return u.shiftRepo.InsertAssignment(ctx, shift.ID, a.DriverID, a.Imei, routeID, unloading, work, trimmed(a.Note), startAt)
 }
 
 func (u *shiftUsecase) AddAssignment(ctx context.Context, shiftID string, body dto.AssignmentRequest) (*dto.Assignment, error) {
@@ -500,7 +500,7 @@ func (u *shiftUsecase) CopyPrevious(ctx context.Context, shiftID string) (*dto.C
 		if err != nil {
 			return nil, err
 		}
-		_, err = u.addAssignment(ctx, shift, dto.AssignmentRequest{DriverID: a.DriverID, Imei: a.Imei, UnloadingID: a.UnloadingID, Note: a.Note})
+		_, err = u.addAssignment(ctx, shift, dto.AssignmentRequest{DriverID: a.DriverID, Imei: a.Imei, UnloadingID: a.UnloadingID, WorkSiteID: a.WorkSiteID, Note: a.Note})
 		var ae *apperror.AppError
 		switch {
 		case err == nil:
@@ -515,23 +515,37 @@ func (u *shiftUsecase) CopyPrevious(ctx context.Context, shiftID string) (*dto.C
 	return out, nil
 }
 
-// unloadingFor: the stockpile / jetty of a unit on routeID (nil = the route's main one). A route
-// with one jetty needs no choice; with several, the choice must be one of them.
-func (u *shiftUsecase) unloadingFor(ctx context.Context, routeID string, want *string) (*string, error) {
-	if want == nil || *want == "" {
-		return nil, nil
+// sitesFor: the stockpile / jetty a dump truck hauls to, or where an excavator works, on routeID
+// (nil = the route's main jetty / its pit). A route with one jetty needs no choice for trucks.
+func (u *shiftUsecase) sitesFor(ctx context.Context, routeID, imei string, unloading, work *string) (*string, *string, error) {
+	isEx := u.tracker.UnitType(imei) == "EX"
+	want := unloading
+	if isEx {
+		want = work
 	}
-	ids, err := u.shiftRepo.RouteUnloadings(ctx, routeID)
+	if want == nil || *want == "" {
+		return nil, nil, nil
+	}
+	loading, ids, err := u.shiftRepo.RouteSites(ctx, routeID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if isEx {
+		if *want == loading {
+			return nil, nil, nil // pit
+		}
+		if !slices.Contains(ids, *want) {
+			return nil, nil, apperror.BadRequest("Lokasi excavator harus pit atau stockpile / jetty rute ini")
+		}
+		return nil, want, nil
 	}
 	if len(ids) <= 1 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if !slices.Contains(ids, *want) {
-		return nil, apperror.BadRequest("Stockpile / jetty itu bukan bagian dari rute unit ini")
+		return nil, nil, apperror.BadRequest("Stockpile / jetty itu bukan bagian dari rute unit ini")
 	}
-	return want, nil
+	return want, nil, nil
 }
 
 // UpdateAssignment: a planned shift is overwritten. On a running shift, a change of
@@ -561,7 +575,7 @@ func (u *shiftUsecase) UpdateAssignment(ctx context.Context, id string, body dto
 	if err := u.check(ctx, shift, body, id); err != nil {
 		return nil, err
 	}
-	unloading, err := u.unloadingFor(ctx, routeID, body.UnloadingID)
+	unloading, work, err := u.sitesFor(ctx, routeID, body.Imei, body.UnloadingID, body.WorkSiteID)
 	if err != nil {
 		return nil, err
 	}
@@ -572,9 +586,9 @@ func (u *shiftUsecase) UpdateAssignment(ctx context.Context, id string, body dto
 		if err := u.shiftRepo.EndAssignment(ctx, id, now); err != nil {
 			return nil, err
 		}
-		a, err = u.shiftRepo.InsertAssignment(ctx, shift.ID, body.DriverID, body.Imei, routeID, unloading, trimmed(body.Note), &now)
+		a, err = u.shiftRepo.InsertAssignment(ctx, shift.ID, body.DriverID, body.Imei, routeID, unloading, work, trimmed(body.Note), &now)
 	} else {
-		a, err = u.shiftRepo.UpdateAssignment(ctx, id, body.DriverID, body.Imei, routeID, unloading, trimmed(body.Note))
+		a, err = u.shiftRepo.UpdateAssignment(ctx, id, body.DriverID, body.Imei, routeID, unloading, work, trimmed(body.Note))
 	}
 	if err != nil {
 		return nil, err
@@ -726,9 +740,9 @@ func (u *shiftUsecase) MoveUnit(ctx context.Context, imei, toRouteID string) (*d
 	}
 	now := time.Now().UnixMilli()
 	note := "Dipindah dari shift " + from.Name + " (panel dispatcher)"
-	// Same stockpile / jetty when the new route has it, else the new route's main one.
-	unloading, _ := u.unloadingFor(ctx, toRouteID, old.UnloadingID)
-	a, err := u.shiftRepo.InsertAssignment(ctx, to.ID, old.DriverID, imei, toRouteID, unloading, &note, &now)
+	// Same stockpile / jetty (excavator: work site) when the new route has it, else its main one / pit.
+	unloading, work, _ := u.sitesFor(ctx, toRouteID, imei, old.UnloadingID, old.WorkSiteID)
+	a, err := u.shiftRepo.InsertAssignment(ctx, to.ID, old.DriverID, imei, toRouteID, unloading, work, &note, &now)
 	if err != nil {
 		return nil, err
 	}

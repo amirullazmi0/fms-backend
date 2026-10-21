@@ -438,6 +438,16 @@ func (t *Tracker) PayloadTon(imei string) float64 {
 	return DefaultPayloadTon
 }
 
+// UnitType is the unit's type (DT, EX, LV, SUPPORT); DT when unknown.
+func (t *Tracker) UnitType(imei string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if d, ok := t.state[imei]; ok && d.UnitType != "" {
+		return d.UnitType
+	}
+	return "DT"
+}
+
 // UnitLabel is the name shown for a unit: plate, else name, else IMEI.
 func UnitLabel(d dto.Device) string {
 	switch {

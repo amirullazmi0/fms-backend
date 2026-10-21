@@ -907,9 +907,10 @@ func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 	}
 }
 
-// syncOthers places the EX, LV and SUPPORT units. An EX works at the front loading of its fleet
-// (Fleet → excavator), else of a route in use. LV and SUPPORT drive the routes in use (one route
-// each, in turn). No route in use: they park (LV / SUPPORT loop with Loop).
+// syncOthers places the EX, LV and SUPPORT units. An EX works where its shift assignment says
+// (pit or a stockpile / jetty), else at the pit of its fleet (Fleet → excavator), else of a route
+// in use. LV and SUPPORT drive the routes in use (one route each, in turn). No route in use: they
+// park (LV / SUPPORT loop with Loop).
 func syncOthers(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 	imeis := []string{}
 	for _, d := range fleet {
@@ -967,6 +968,26 @@ func syncOthers(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 	}
 	keys, list := scan(rows, true)
 	loaders := map[string]*routeInfo{}
+	for i, k := range keys {
+		loaders[k] = list[i]
+	}
+	// Excavators assigned in a running shift work where the assignment says (l = the pit, or a
+	// stockpile / jetty of the route); this wins over the fleet excavator.
+	rows, err = database.NewQueryBuilder("assignments a").
+		Select("DISTINCT ON (a.imei) a.imei", "r.id", "r.name", "w.lat", "w.lng", "u.lat", "u.lng").
+		InnerJoin("shifts sh", "sh.id = a.shift_id AND sh.status = 'active' AND sh.deleted_at IS NULL").
+		InnerJoin("routes r", "r.id = a.route_id").
+		InnerJoin("sites w", "w.id = COALESCE(a.work_site_id, r.loading_site_id)").
+		InnerJoin("sites u", "u.id = r.unloading_site_id").
+		WhereNull("a.end_at").
+		Where("a.imei = ANY($1::text[])", pq.Array(imeis)).
+		OrderBy("a.imei").
+		OrderBy("COALESCE(a.start_at, sh.started_at) DESC").
+		ExecuteContext(ctx, db)
+	if err != nil {
+		return
+	}
+	keys, list = scan(rows, true)
 	for i, k := range keys {
 		loaders[k] = list[i]
 	}

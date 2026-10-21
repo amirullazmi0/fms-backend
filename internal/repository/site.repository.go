@@ -34,15 +34,19 @@ const FinishingTrip = `(EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.
 		AND s2.deleted_at IS NULL WHERE a2.imei = a.imei AND a2.end_at IS NULL)))`
 
 // onDuty = what trucks are working on: an active shift (phase active), or a closed shift whose
-// last ritase is still heading to unloading (phase finishing).
+// last ritase is still heading to unloading (phase finishing). Excavators are not trucks: they are
+// listed apart (routes.excavators).
 const onDuty = `(SELECT a.id, a.imei, a.driver_id, a.route_id, a.unloading_site_id, sh.id AS shift_id, sh.name AS shift_name, 'active' AS phase, NULL::timestamptz AS closed_at
 		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'active' AND sh.deleted_at IS NULL
-		WHERE a.end_at IS NULL
+		WHERE a.end_at IS NULL AND ` + notExcavator + `
 	UNION ALL
 	SELECT a.id, a.imei, a.driver_id, a.route_id, a.unloading_site_id, sh.id, sh.name, 'finishing', sh.closed_at
 		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'closed' AND sh.deleted_at IS NULL
 			AND sh.closed_at > now() - interval '6 hours'
-		WHERE a.end_at IS NULL AND ` + FinishingTrip + `) a`
+		WHERE a.end_at IS NULL AND ` + notExcavator + ` AND ` + FinishingTrip + `) a`
+
+// notExcavator: the assignment's unit is not an excavator (alias a = assignment).
+const notExcavator = `NOT EXISTS (SELECT 1 FROM devices dv WHERE dv.imei = a.imei AND dv.unit_type = 'EX')`
 
 // recentDone = assignments of shifts closed in the last 12 h whose truck is done (not finishing).
 const recentDone = `(SELECT a.id, a.imei, a.driver_id, a.route_id, sh.id AS shift_id, sh.name AS shift_name, 'done' AS phase, sh.closed_at
@@ -289,6 +293,11 @@ var routeColumns = []string{
 	`(SELECT json_agg(json_build_object('shiftId', a.shift_id, 'shiftName', a.shift_name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
 			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint) ORDER BY a.closed_at DESC)
 		FROM ` + recentDone + ` JOIN users d ON d.id = a.driver_id WHERE a.route_id = r.id) AS recent_done`,
+	`(SELECT json_agg(json_build_object('shiftId', sh.id, 'shiftName', sh.name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
+			'phase', 'active', 'workSiteId', a.work_site_id) ORDER BY d.name)
+		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'active' AND sh.deleted_at IS NULL
+		JOIN devices dv ON dv.imei = a.imei AND dv.unit_type = 'EX' JOIN users d ON d.id = a.driver_id
+		WHERE a.route_id = r.id AND a.end_at IS NULL) AS excavators`,
 }
 
 func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {
@@ -298,9 +307,9 @@ func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {
 		var x dto.Route
 		var note sql.NullString
 		var created, updated time.Time
-		var duty, done []byte
+		var duty, done, exs []byte
 		var extra []string
-		if err := rows.Scan(&x.ID, &x.Name, &x.LoadingID, &x.UnloadingID, pq.Array(&extra), &note, &created, &updated, &duty, &done); err != nil {
+		if err := rows.Scan(&x.ID, &x.Name, &x.LoadingID, &x.UnloadingID, pq.Array(&extra), &note, &created, &updated, &duty, &done, &exs); err != nil {
 			return nil, err
 		}
 		x.UnloadingIDs = append([]string{x.UnloadingID}, extra...)
@@ -315,6 +324,11 @@ func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {
 		x.RecentDone = []dto.OnDuty{}
 		if len(done) > 0 {
 			if err := json.Unmarshal(done, &x.RecentDone); err != nil {
+				return nil, err
+			}
+		}
+		if len(exs) > 0 {
+			if err := json.Unmarshal(exs, &x.Excavators); err != nil {
 				return nil, err
 			}
 		}

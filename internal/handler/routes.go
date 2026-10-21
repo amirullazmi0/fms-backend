@@ -81,6 +81,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 
 	productionUsecase := usecase.NewProductionUsecase(productionRepo, tripRepo, liveTracker, &cfg.Report)
 	productionHandler := NewProductionHandler(productionUsecase)
+	exportHandler := NewExportHandler(shiftUsecase, productionUsecase, cfg.Report.Location)
 
 	mdtUsecase := usecase.NewMdtUsecase(mdtRepo, tripRepo, liveTracker, cfg.Report.TimeZone)
 	mdtHandler := NewMdtHandler(mdtUsecase)
@@ -364,6 +365,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			reports.GET("/heatmap", productionHandler.Heatmap)
 			reports.GET("/breakdowns", productionHandler.Breakdowns)
 			reports.GET("/operators", productionHandler.OperatorReport)
+			reports.GET("/export", exportHandler.Export)
 			reports.GET("/overspeed", speedZoneHandler.Report)
 		}
 

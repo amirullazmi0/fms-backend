@@ -35,6 +35,7 @@ type ProductionUsecase interface {
 	Availability(ctx context.Context, q dto.AvailabilityQuery) (*dto.AvailabilityReport, error)
 	Heatmap(ctx context.Context, q dto.HeatmapQuery) (*dto.HeatmapReport, error)
 	Breakdowns(ctx context.Context, q dto.ReportQuery) (*dto.BreakdownReport, error)
+	OperatorReport(ctx context.Context, q dto.ReportQuery) (*dto.OperatorReport, error)
 }
 
 type productionUsecase struct {

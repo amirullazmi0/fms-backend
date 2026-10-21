@@ -35,6 +35,8 @@ type ProductionRepository interface {
 	Shocks(ctx context.Context, from, to int64, routeID string, limit int) ([]dto.ShockPoint, error)
 	// BreakdownLogs: log status breakdown dalam periode (P3-5).
 	BreakdownLogs(ctx context.Context, from, to int64) ([]dto.BreakdownLog, error)
+	// AssignmentStats: angka per penugasan untuk rapor operator & laporan idle (P3-6 / P3-7).
+	AssignmentStats(ctx context.Context, from, to int64) ([]dto.AssignmentStats, error)
 }
 
 type productionRepository struct {

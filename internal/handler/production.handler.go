@@ -144,6 +144,27 @@ func (h *ProductionHandler) Stages(c *gin.Context) {
 	response.Success(c, http.StatusOK, "Stage report retrieved successfully", r)
 }
 
+// OperatorReport godoc
+// @Summary Rapor operator (ritase, cycle time, dumping, idle, overspeed, disiplin shift, skor) & laporan idle per unit
+// @Tags production
+// @Security BearerAuth
+// @Param from query int false "Start (ms)"
+// @Param to query int false "End (ms)"
+// @Success 200 {object} response.Response{data=dto.OperatorReport}
+// @Router /api/reports/operators [get]
+func (h *ProductionHandler) OperatorReport(c *gin.Context) {
+	var q dto.ReportQuery
+	if !bindQuery(c, &q) {
+		return
+	}
+	r, err := h.productionUsecase.OperatorReport(c.Request.Context(), q)
+	if err != nil {
+		respondError(c, err, "Failed to build operator report")
+		return
+	}
+	response.Success(c, http.StatusOK, "Operator report retrieved successfully", r)
+}
+
 // Breakdowns godoc
 // @Summary Log breakdown & durasi perbaikan: episode, MTTR per unit dan per jenis BD
 // @Tags production

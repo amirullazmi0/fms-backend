@@ -35,11 +35,11 @@ const FinishingTrip = `(EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.
 
 // onDuty = what trucks are working on: an active shift (phase active), or a closed shift whose
 // last ritase is still heading to unloading (phase finishing).
-const onDuty = `(SELECT a.id, a.imei, a.driver_id, a.route_id, sh.id AS shift_id, sh.name AS shift_name, 'active' AS phase, NULL::timestamptz AS closed_at
+const onDuty = `(SELECT a.id, a.imei, a.driver_id, a.route_id, a.unloading_site_id, sh.id AS shift_id, sh.name AS shift_name, 'active' AS phase, NULL::timestamptz AS closed_at
 		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'active' AND sh.deleted_at IS NULL
 		WHERE a.end_at IS NULL
 	UNION ALL
-	SELECT a.id, a.imei, a.driver_id, a.route_id, sh.id, sh.name, 'finishing', sh.closed_at
+	SELECT a.id, a.imei, a.driver_id, a.route_id, a.unloading_site_id, sh.id, sh.name, 'finishing', sh.closed_at
 		FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'closed' AND sh.deleted_at IS NULL
 			AND sh.closed_at > now() - interval '6 hours'
 		WHERE a.end_at IS NULL AND ` + FinishingTrip + `) a`
@@ -86,7 +86,7 @@ func NewSiteRepository(db *sql.DB) SiteRepository {
 var siteColumns = []string{
 	"s.id", "s.name", "s.lat", "s.lng", "s.radius_m", "s.note", "s.created_at", "s.updated_at",
 	`(SELECT array_agg(DISTINCT a.imei) FROM ` + onDuty + ` JOIN routes r ON r.id = a.route_id
-		WHERE r.loading_site_id = s.id OR r.unloading_site_id = s.id) AS imeis`,
+		WHERE r.loading_site_id = s.id OR COALESCE(a.unloading_site_id, r.unloading_site_id) = s.id) AS imeis`,
 	"s.queue_alert_trucks", "s.queue_alert_min",
 	`(SELECT COALESCE(json_agg(json_build_object('id', z.id, 'kind', z.kind, 'lat', z.lat, 'lng', z.lng, 'radius', z.radius_m)
 		ORDER BY z.kind, z.created_at), '[]') FROM site_zones z WHERE z.site_id = s.id AND z.deleted_at IS NULL) AS zones`,
@@ -269,7 +269,7 @@ func (r *siteRepository) DeleteSite(ctx context.Context, id, deletedBy string) (
 func (r *siteRepository) RoutesUsingSite(ctx context.Context, id string) ([]string, error) {
 	rows, err := database.NewQueryBuilder("routes").
 		Select("name").
-		Where("(loading_site_id = $1 OR unloading_site_id = $1)", id).
+		Where("(loading_site_id = $1 OR unloading_site_id = $1 OR $1 = ANY(extra_unloading_ids))", id).
 		WhereNull("deleted_at").
 		OrderBy("name").
 		ExecuteContext(ctx, r.db)
@@ -282,9 +282,9 @@ func (r *siteRepository) RoutesUsingSite(ctx context.Context, id string) ([]stri
 // ---------- Routes ----------
 
 var routeColumns = []string{
-	"r.id", "r.name", "r.loading_site_id", "r.unloading_site_id", "r.note", "r.created_at", "r.updated_at",
+	"r.id", "r.name", "r.loading_site_id", "r.unloading_site_id", "r.extra_unloading_ids::text[]", "r.note", "r.created_at", "r.updated_at",
 	`(SELECT json_agg(json_build_object('shiftId', a.shift_id, 'shiftName', a.shift_name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
-			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint) ORDER BY d.name)
+			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint, 'unloadingId', a.unloading_site_id) ORDER BY d.name)
 		FROM ` + onDuty + ` JOIN users d ON d.id = a.driver_id WHERE a.route_id = r.id) AS on_duty`,
 	`(SELECT json_agg(json_build_object('shiftId', a.shift_id, 'shiftName', a.shift_name, 'driverId', d.id, 'driverName', d.name, 'imei', a.imei,
 			'phase', a.phase, 'closedAt', (EXTRACT(EPOCH FROM a.closed_at) * 1000)::bigint) ORDER BY a.closed_at DESC)
@@ -299,9 +299,11 @@ func scanRoutes(rows *sql.Rows) ([]dto.Route, error) {
 		var note sql.NullString
 		var created, updated time.Time
 		var duty, done []byte
-		if err := rows.Scan(&x.ID, &x.Name, &x.LoadingID, &x.UnloadingID, &note, &created, &updated, &duty, &done); err != nil {
+		var extra []string
+		if err := rows.Scan(&x.ID, &x.Name, &x.LoadingID, &x.UnloadingID, pq.Array(&extra), &note, &created, &updated, &duty, &done); err != nil {
 			return nil, err
 		}
+		x.UnloadingIDs = append([]string{x.UnloadingID}, extra...)
 		x.Note = database.NullString(note)
 		x.CreatedAt, x.UpdatedAt = database.Ms(created), database.Ms(updated)
 		x.OnDuty = []dto.OnDuty{}
@@ -369,7 +371,8 @@ func (r *siteRepository) CreateRoute(ctx context.Context, body dto.UpsertRouteRe
 	err := database.NewInsertBuilder("routes").
 		Set("name", strings.TrimSpace(body.Name)).
 		Set("loading_site_id", body.LoadingID).
-		Set("unloading_site_id", body.UnloadingID).
+		Set("unloading_site_id", body.Unloadings()[0]).
+		Set("extra_unloading_ids", pq.Array(body.Unloadings()[1:])).
 		Set("note", noteOf(body.Note)).
 		SetCreatedBy(createdBy).
 		QueryRowContext(ctx, r.db).Scan(&id)
@@ -380,7 +383,8 @@ func (r *siteRepository) UpdateRoute(ctx context.Context, id string, body dto.Up
 	res, err := database.NewUpdateBuilder("routes").
 		Set("name", strings.TrimSpace(body.Name)).
 		Set("loading_site_id", body.LoadingID).
-		Set("unloading_site_id", body.UnloadingID).
+		Set("unloading_site_id", body.Unloadings()[0]).
+		Set("extra_unloading_ids", pq.Array(body.Unloadings()[1:])).
 		Set("note", noteOf(body.Note)).
 		SetUpdatedBy(updatedBy).
 		Where("id = $1", id).

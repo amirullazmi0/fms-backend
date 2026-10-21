@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ type ShiftUsecase interface {
 }
 
 type shiftUsecase struct {
-	visitRepo repository.VisitRepository
+	visitRepo  repository.VisitRepository
 	shiftRepo  repository.ShiftRepository
 	driverRepo repository.DriverRepository
 	tripRepo   repository.TripRepository
@@ -442,6 +443,10 @@ func (u *shiftUsecase) addAssignment(ctx context.Context, shift *dto.Shift, a dt
 	if err := u.check(ctx, shift, a, ""); err != nil {
 		return nil, err
 	}
+	unloading, err := u.unloadingFor(ctx, routeID, a.UnloadingID)
+	if err != nil {
+		return nil, err
+	}
 	// Running shift: valid from the shift start if this driver & truck were not used in it yet
 	// (e.g. forgotten at the briefing); if they were (a swap), valid from now.
 	var startAt *int64
@@ -454,7 +459,7 @@ func (u *shiftUsecase) addAssignment(ctx context.Context, shift *dto.Shift, a dt
 			}
 		}
 	}
-	return u.shiftRepo.InsertAssignment(ctx, shift.ID, a.DriverID, a.Imei, routeID, trimmed(a.Note), startAt)
+	return u.shiftRepo.InsertAssignment(ctx, shift.ID, a.DriverID, a.Imei, routeID, unloading, trimmed(a.Note), startAt)
 }
 
 func (u *shiftUsecase) AddAssignment(ctx context.Context, shiftID string, body dto.AssignmentRequest) (*dto.Assignment, error) {
@@ -495,7 +500,7 @@ func (u *shiftUsecase) CopyPrevious(ctx context.Context, shiftID string) (*dto.C
 		if err != nil {
 			return nil, err
 		}
-		_, err = u.addAssignment(ctx, shift, dto.AssignmentRequest{DriverID: a.DriverID, Imei: a.Imei, Note: a.Note})
+		_, err = u.addAssignment(ctx, shift, dto.AssignmentRequest{DriverID: a.DriverID, Imei: a.Imei, UnloadingID: a.UnloadingID, Note: a.Note})
 		var ae *apperror.AppError
 		switch {
 		case err == nil:
@@ -508,6 +513,25 @@ func (u *shiftUsecase) CopyPrevious(ctx context.Context, shiftID string) (*dto.C
 	}
 	u.changed(shiftID)
 	return out, nil
+}
+
+// unloadingFor: the stockpile / jetty of a unit on routeID (nil = the route's main one). A route
+// with one jetty needs no choice; with several, the choice must be one of them.
+func (u *shiftUsecase) unloadingFor(ctx context.Context, routeID string, want *string) (*string, error) {
+	if want == nil || *want == "" {
+		return nil, nil
+	}
+	ids, err := u.shiftRepo.RouteUnloadings(ctx, routeID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) <= 1 {
+		return nil, nil
+	}
+	if !slices.Contains(ids, *want) {
+		return nil, apperror.BadRequest("Stockpile / jetty itu bukan bagian dari rute unit ini")
+	}
+	return want, nil
 }
 
 // UpdateAssignment: a planned shift is overwritten. On a running shift, a change of
@@ -537,6 +561,10 @@ func (u *shiftUsecase) UpdateAssignment(ctx context.Context, id string, body dto
 	if err := u.check(ctx, shift, body, id); err != nil {
 		return nil, err
 	}
+	unloading, err := u.unloadingFor(ctx, routeID, body.UnloadingID)
+	if err != nil {
+		return nil, err
+	}
 	moved := body.DriverID != old.DriverID || body.Imei != old.Imei || routeID != old.RouteID
 	var a *dto.Assignment
 	if shift.Status == "active" && moved {
@@ -544,9 +572,9 @@ func (u *shiftUsecase) UpdateAssignment(ctx context.Context, id string, body dto
 		if err := u.shiftRepo.EndAssignment(ctx, id, now); err != nil {
 			return nil, err
 		}
-		a, err = u.shiftRepo.InsertAssignment(ctx, shift.ID, body.DriverID, body.Imei, routeID, trimmed(body.Note), &now)
+		a, err = u.shiftRepo.InsertAssignment(ctx, shift.ID, body.DriverID, body.Imei, routeID, unloading, trimmed(body.Note), &now)
 	} else {
-		a, err = u.shiftRepo.UpdateAssignment(ctx, id, body.DriverID, body.Imei, routeID, trimmed(body.Note))
+		a, err = u.shiftRepo.UpdateAssignment(ctx, id, body.DriverID, body.Imei, routeID, unloading, trimmed(body.Note))
 	}
 	if err != nil {
 		return nil, err
@@ -698,7 +726,9 @@ func (u *shiftUsecase) MoveUnit(ctx context.Context, imei, toRouteID string) (*d
 	}
 	now := time.Now().UnixMilli()
 	note := "Dipindah dari shift " + from.Name + " (panel dispatcher)"
-	a, err := u.shiftRepo.InsertAssignment(ctx, to.ID, old.DriverID, imei, toRouteID, &note, &now)
+	// Same stockpile / jetty when the new route has it, else the new route's main one.
+	unloading, _ := u.unloadingFor(ctx, toRouteID, old.UnloadingID)
+	a, err := u.shiftRepo.InsertAssignment(ctx, to.ID, old.DriverID, imei, toRouteID, unloading, &note, &now)
 	if err != nil {
 		return nil, err
 	}

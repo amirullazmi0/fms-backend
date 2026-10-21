@@ -260,7 +260,7 @@ func BuildReport(records []dto.AvlRecord, routes []dto.Route, sites []dto.Site, 
 		if p := pending; p != nil && p.Depart != nil && v.Arrive >= *p.Depart && v.SiteID != p.SiteID {
 			for ri := range routes {
 				route := &routes[ri]
-				if route.LoadingID == p.SiteID && route.UnloadingID == v.SiteID {
+				if route.LoadingID == p.SiteID && route.HasUnloading(v.SiteID) {
 					arrived := v
 					push("go", routeRef{route.ID, route.Name}, *p, &arrived, "done")
 					pending = nil

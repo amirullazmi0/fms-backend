@@ -123,7 +123,7 @@ func (u *dispatchUsecase) Board(ctx context.Context) (*dto.DispatchBoard, error)
 	}
 	siteIDs := []string{}
 	for _, r := range routes {
-		siteIDs = append(siteIDs, r.LoadingID, r.UnloadingID)
+		siteIDs = append(siteIDs, r.SiteIDs()...)
 	}
 	sites, err := u.sites.SitesByIDs(ctx, siteIDs, true)
 	if err != nil {
@@ -137,7 +137,7 @@ func (u *dispatchUsecase) Board(ctx context.Context) (*dto.DispatchBoard, error)
 	board := &dto.DispatchBoard{At: now, Fleets: []dto.Fleet{}, Moves: []dto.FleetMove{}}
 	for _, r := range routes {
 		f := dto.Fleet{RouteID: r.ID, RouteName: r.Name, LoadingName: siteBy[r.LoadingID].Name,
-			UnloadingName: siteBy[r.UnloadingID].Name, Trucks: []dto.FleetTruck{}, HangingWindow: hangingWindow}
+			UnloadingName: siteNames(siteBy, r.Unloadings()), Trucks: []dto.FleetTruck{}, HangingWindow: hangingWindow}
 		if l, ok := loaders[r.ID]; ok {
 			f.Loader = &l
 		}
@@ -351,4 +351,15 @@ func suggestMoves(fleets []dto.Fleet) []dto.FleetMove {
 		to.active++
 	}
 	return moves
+}
+
+// siteNames: the names of ids, joined (a route's stockpiles / jetties).
+func siteNames(by map[string]dto.Site, ids []string) string {
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if s, ok := by[id]; ok {
+			names = append(names, s.Name)
+		}
+	}
+	return strings.Join(names, " / ")
 }

@@ -120,7 +120,7 @@ func (u *deviceUsecase) Ritase(ctx context.Context, imei string, q dto.DayQuery)
 	ids := []string{}
 	seen := map[string]bool{}
 	for _, r := range routes {
-		for _, id := range []string{r.LoadingID, r.UnloadingID} {
+		for _, id := range r.SiteIDs() {
 			if !seen[id] {
 				seen[id] = true
 				ids = append(ids, id)

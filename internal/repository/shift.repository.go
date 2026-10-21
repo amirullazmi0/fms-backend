@@ -41,9 +41,11 @@ type ShiftRepository interface {
 
 	// ClashOtherShift: driver/truck still on duty in another non-closed shift whose hours overlap.
 	ClashOtherShift(ctx context.Context, shiftID, driverID, imei string, from, end int64) (string, error)
-	InsertAssignment(ctx context.Context, shiftID, driverID, imei, routeID string, note *string, startAt *int64) (*dto.Assignment, error)
+	InsertAssignment(ctx context.Context, shiftID, driverID, imei, routeID string, unloadingID, note *string, startAt *int64) (*dto.Assignment, error)
 	GetAssignment(ctx context.Context, id string) (*dto.Assignment, error)
-	UpdateAssignment(ctx context.Context, id, driverID, imei, routeID string, note *string) (*dto.Assignment, error)
+	UpdateAssignment(ctx context.Context, id, driverID, imei, routeID string, unloadingID, note *string) (*dto.Assignment, error)
+	// RouteUnloadings: the unloading sites of a route, the main one first.
+	RouteUnloadings(ctx context.Context, routeID string) ([]string, error)
 	EndAssignment(ctx context.Context, id string, at int64) error
 	// AssignmentState: shift status, end, and stored trip count of an assignment.
 	AssignmentState(ctx context.Context, id string) (state *AssignmentState, err error)
@@ -89,17 +91,17 @@ func scanShift(row interface{ Scan(...any) error }, now int64) (dto.Shift, error
 	return s, nil
 }
 
-var assignmentColumns = []string{"id", "shift_id", "driver_id", "imei", "route_id", "note", "start_at", "end_at", "created_at"}
+var assignmentColumns = []string{"id", "shift_id", "driver_id", "imei", "route_id", "unloading_site_id", "note", "start_at", "end_at", "created_at"}
 
 func scanAssignment(row interface{ Scan(...any) error }) (dto.Assignment, error) {
 	var a dto.Assignment
-	var note sql.NullString
+	var note, unloading sql.NullString
 	var start, end sql.NullTime
 	var created time.Time
-	if err := row.Scan(&a.ID, &a.ShiftID, &a.DriverID, &a.Imei, &a.RouteID, &note, &start, &end, &created); err != nil {
+	if err := row.Scan(&a.ID, &a.ShiftID, &a.DriverID, &a.Imei, &a.RouteID, &unloading, &note, &start, &end, &created); err != nil {
 		return a, err
 	}
-	a.Note = database.NullString(note)
+	a.Note, a.UnloadingID = database.NullString(note), database.NullString(unloading)
 	a.StartAt, a.EndAt = database.NullMs(start), database.NullMs(end)
 	a.CreatedAt = database.Ms(created)
 	return a, nil
@@ -396,12 +398,13 @@ func (r *shiftRepository) ClashOtherShift(ctx context.Context, shiftID, driverID
 	return fmt.Sprintf("%s ini sudah bertugas di shift %s%s (%s) pada jam yang bentrok", who, shift, on, date), nil
 }
 
-func (r *shiftRepository) InsertAssignment(ctx context.Context, shiftID, driverID, imei, routeID string, note *string, startAt *int64) (*dto.Assignment, error) {
+func (r *shiftRepository) InsertAssignment(ctx context.Context, shiftID, driverID, imei, routeID string, unloadingID, note *string, startAt *int64) (*dto.Assignment, error) {
 	a, err := scanAssignment(database.NewInsertBuilder("assignments").
 		Set("shift_id", shiftID).
 		Set("driver_id", driverID).
 		Set("imei", imei).
 		Set("route_id", routeID).
+		Set("unloading_site_id", unloadingID).
 		Set("note", note).
 		Set("start_at", database.FromMsPtr(startAt)).
 		Returning(assignmentColumns...).
@@ -410,6 +413,17 @@ func (r *shiftRepository) InsertAssignment(ctx context.Context, shiftID, driverI
 		return nil, err
 	}
 	return &a, nil
+}
+
+func (r *shiftRepository) RouteUnloadings(ctx context.Context, routeID string) ([]string, error) {
+	var out []string
+	err := database.RawQueryRowContext(ctx, r.db,
+		`SELECT array_prepend(unloading_site_id, extra_unloading_ids)::text[] FROM routes WHERE id = $1`, routeID).
+		Scan(pq.Array(&out))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return out, err
 }
 
 func (r *shiftRepository) GetAssignment(ctx context.Context, id string) (*dto.Assignment, error) {
@@ -424,11 +438,12 @@ func (r *shiftRepository) GetAssignment(ctx context.Context, id string) (*dto.As
 	return &a, nil
 }
 
-func (r *shiftRepository) UpdateAssignment(ctx context.Context, id, driverID, imei, routeID string, note *string) (*dto.Assignment, error) {
+func (r *shiftRepository) UpdateAssignment(ctx context.Context, id, driverID, imei, routeID string, unloadingID, note *string) (*dto.Assignment, error) {
 	query, args := database.NewUpdateBuilder("assignments").
 		Set("driver_id", driverID).
 		Set("imei", imei).
 		Set("route_id", routeID).
+		Set("unloading_site_id", unloadingID).
 		Set("note", note).
 		Where("id = $1", id).
 		Returning(assignmentColumns...).

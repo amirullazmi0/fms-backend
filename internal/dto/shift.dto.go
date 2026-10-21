@@ -47,24 +47,26 @@ type ShiftTemplate struct {
 }
 
 type UpsertShiftTemplateRequest struct {
-	Name      string `json:"name" validate:"required,max=40"`
-	StartTime string `json:"startTime" validate:"required,hhmm"`
-	EndTime   string `json:"endTime" validate:"required,hhmm,nefield=StartTime"`
-	AutoClose *bool  `json:"autoClose"`
-	Sort      int    `json:"sort"`
+	Name      string       `json:"name" validate:"required,max=40"`
+	StartTime string       `json:"startTime" validate:"required,hhmm"`
+	EndTime   string       `json:"endTime" validate:"required,hhmm,nefield=StartTime"`
+	AutoClose *bool        `json:"autoClose"`
+	Sort      int          `json:"sort"`
 	Breaks    []ShiftBreak `json:"breaks" validate:"omitempty,max=8,dive"`
 }
 
 type Assignment struct {
-	ID        string  `json:"id"`
-	ShiftID   string  `json:"shiftId"`
-	DriverID  string  `json:"driverId"`
-	Imei      string  `json:"imei"`
-	RouteID   string  `json:"routeId"`
-	Note      *string `json:"note"`
-	StartAt   *int64  `json:"startAt"` // null = from shift start
-	EndAt     *int64  `json:"endAt"`   // null = valid until the shift ends
-	CreatedAt int64   `json:"createdAt"`
+	ID       string `json:"id"`
+	ShiftID  string `json:"shiftId"`
+	DriverID string `json:"driverId"`
+	Imei     string `json:"imei"`
+	RouteID  string `json:"routeId"`
+	// UnloadingID: the stockpile / jetty this unit hauls to (null = the route's main one).
+	UnloadingID *string `json:"unloadingId"`
+	Note        *string `json:"note"`
+	StartAt     *int64  `json:"startAt"` // null = from shift start
+	EndAt       *int64  `json:"endAt"`   // null = valid until the shift ends
+	CreatedAt   int64   `json:"createdAt"`
 }
 
 type Shift struct {
@@ -95,25 +97,25 @@ type ShiftDetail struct {
 }
 
 type CreateShiftRequest struct {
-	Name         string  `json:"name" validate:"required,max=40"`
-	RouteID      string  `json:"routeId" validate:"required,uuid"`
-	Date         string  `json:"date" validate:"required,datetime=2006-01-02"`
-	PlannedStart int64   `json:"plannedStart" validate:"required"`
-	PlannedEnd   int64   `json:"plannedEnd" validate:"required,gtfield=PlannedStart"`
-	AutoClose    *bool   `json:"autoClose"`
-	Note         *string `json:"note" validate:"omitempty,max=200"`
+	Name         string       `json:"name" validate:"required,max=40"`
+	RouteID      string       `json:"routeId" validate:"required,uuid"`
+	Date         string       `json:"date" validate:"required,datetime=2006-01-02"`
+	PlannedStart int64        `json:"plannedStart" validate:"required"`
+	PlannedEnd   int64        `json:"plannedEnd" validate:"required,gtfield=PlannedStart"`
+	AutoClose    *bool        `json:"autoClose"`
+	Note         *string      `json:"note" validate:"omitempty,max=200"`
 	Breaks       []ShiftBreak `json:"breaks" validate:"omitempty,max=8,dive"`
 }
 
 // UpdateShiftRequest is a partial update: nil fields keep their value.
 type UpdateShiftRequest struct {
-	Name         *string `json:"name" validate:"omitempty,min=1,max=40"`
-	RouteID      *string `json:"routeId" validate:"omitempty,uuid"`
-	Date         *string `json:"date" validate:"omitempty,datetime=2006-01-02"`
-	PlannedStart *int64  `json:"plannedStart"`
-	PlannedEnd   *int64  `json:"plannedEnd"`
-	AutoClose    *bool   `json:"autoClose"`
-	Note         *string `json:"note" validate:"omitempty,max=200"`
+	Name         *string       `json:"name" validate:"omitempty,min=1,max=40"`
+	RouteID      *string       `json:"routeId" validate:"omitempty,uuid"`
+	Date         *string       `json:"date" validate:"omitempty,datetime=2006-01-02"`
+	PlannedStart *int64        `json:"plannedStart"`
+	PlannedEnd   *int64        `json:"plannedEnd"`
+	AutoClose    *bool         `json:"autoClose"`
+	Note         *string       `json:"note" validate:"omitempty,max=200"`
 	Breaks       *[]ShiftBreak `json:"breaks" validate:"omitempty,max=8,dive"`
 }
 
@@ -138,7 +140,9 @@ type AssignmentRequest struct {
 	DriverID string  `json:"driverId" validate:"required,uuid"`
 	Imei     string  `json:"imei" validate:"required,len=15,numeric"`
 	RouteID  *string `json:"routeId" validate:"omitempty,uuid"`
-	Note     *string `json:"note" validate:"omitempty,max=200"`
+	// UnloadingID: stockpile / jetty of the route for this unit (null = the route's main one).
+	UnloadingID *string `json:"unloadingId" validate:"omitempty,uuid"`
+	Note        *string `json:"note" validate:"omitempty,max=200"`
 }
 
 type CopyPreviousResponse struct {

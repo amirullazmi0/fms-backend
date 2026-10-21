@@ -371,7 +371,7 @@ func (r *mdtRepository) Duty(ctx context.Context, imei string) (*dto.MdtDuty, er
 		JOIN shifts sh ON sh.id = a.shift_id AND sh.deleted_at IS NULL
 		JOIN routes r ON r.id = a.route_id
 		JOIN sites ls ON ls.id = r.loading_site_id
-		JOIN sites us ON us.id = r.unloading_site_id
+		JOIN sites us ON us.id = COALESCE(a.unloading_site_id, r.unloading_site_id)
 		JOIN users d ON d.id = a.driver_id
 		WHERE a.imei = $1 AND a.end_at IS NULL AND (sh.status = 'active' OR (sh.status = 'planned' AND sh.planned_end > now())
 			-- Shift ditutup tetapi ritase terakhir belum selesai (masih hauling / dumping): selesaikan dulu.

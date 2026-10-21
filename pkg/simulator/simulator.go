@@ -869,7 +869,7 @@ func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 				AND sh.closed_at > now() - interval '6 hours' AND `+finishingTrip+`))`).
 			InnerJoin("routes r", "r.id = a.route_id").
 			InnerJoin("sites l", "l.id = r.loading_site_id").
-			InnerJoin("sites u", "u.id = r.unloading_site_id").
+			InnerJoin("sites u", "u.id = COALESCE(a.unloading_site_id, r.unloading_site_id)").
 			WhereNull("a.end_at").
 			Where("a.imei = ANY($1::text[])", pq.Array(imeis)).
 			OrderBy("a.imei").

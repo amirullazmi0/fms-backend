@@ -97,7 +97,11 @@ func (s *Scheduler) checkQueues(ctx context.Context, now int64) {
 			if d.Phase != "active" {
 				continue
 			}
-			for _, x := range []struct{ site, code string }{{r.LoadingID, "Q_LOAD"}, {r.UnloadingID, "Q_DUMP"}} {
+			dump := r.UnloadingID
+			if d.UnloadingID != nil {
+				dump = *d.UnloadingID
+			}
+			for _, x := range []struct{ site, code string }{{r.LoadingID, "Q_LOAD"}, {dump, "Q_DUMP"}} {
 				if _, ok := bySite[x.site]; !ok {
 					siteIDs = append(siteIDs, x.site)
 				}

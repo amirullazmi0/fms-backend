@@ -132,33 +132,45 @@ func (u *siteUsecase) GetRoutes(ctx context.Context, q *dto.QueryGlobal) ([]dto.
 	return u.siteRepo.GetRoutes(ctx, q)
 }
 
-// checkRouteSites resolves the loading/unloading sites of a route body.
-func (u *siteUsecase) checkRouteSites(ctx context.Context, body dto.UpsertRouteRequest) (loading, unloading *dto.Site, err error) {
+// checkRouteSites resolves the loading site and the unloading sites (names joined) of a route body.
+func (u *siteUsecase) checkRouteSites(ctx context.Context, body dto.UpsertRouteRequest) (loading *dto.Site, unloading string, err error) {
 	if strings.TrimSpace(body.Name) == "" {
-		return nil, nil, apperror.BadRequest("Nama rute wajib diisi")
+		return nil, "", apperror.BadRequest("Nama rute wajib diisi")
 	}
-	if body.LoadingID == body.UnloadingID {
-		return nil, nil, apperror.BadRequest("Pit dan stockpile / jetty harus beda")
+	ids := body.Unloadings()
+	if len(ids) == 0 {
+		return nil, "", apperror.BadRequest("Pilih stockpile / jetty")
 	}
-	found, err := u.siteRepo.SitesByIDs(ctx, []string{body.LoadingID, body.UnloadingID}, false)
-	if err != nil {
-		return nil, nil, err
-	}
-	for i := range found {
-		switch found[i].ID {
-		case body.LoadingID:
-			loading = &found[i]
-		case body.UnloadingID:
-			unloading = &found[i]
+	seen := map[string]bool{body.LoadingID: true}
+	for _, id := range ids {
+		if id == body.LoadingID {
+			return nil, "", apperror.BadRequest("Pit dan stockpile / jetty harus beda")
 		}
+		if seen[id] {
+			return nil, "", apperror.BadRequest("Stockpile / jetty yang sama dipilih dua kali")
+		}
+		seen[id] = true
 	}
+	found, err := u.siteRepo.SitesByIDs(ctx, append([]string{body.LoadingID}, ids...), false)
+	if err != nil {
+		return nil, "", err
+	}
+	byID := map[string]*dto.Site{}
+	for i := range found {
+		byID[found[i].ID] = &found[i]
+	}
+	loading = byID[body.LoadingID]
 	if loading == nil {
-		return nil, nil, apperror.BadRequest("Pilih pit")
+		return nil, "", apperror.BadRequest("Pilih pit")
 	}
-	if unloading == nil {
-		return nil, nil, apperror.BadRequest("Pilih stockpile / jetty")
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		if byID[id] == nil {
+			return nil, "", apperror.BadRequest("Pilih stockpile / jetty")
+		}
+		names[i] = byID[id].Name
 	}
-	return loading, unloading, nil
+	return loading, strings.Join(names, " / "), nil
 }
 
 func (u *siteUsecase) CreateRoute(ctx context.Context, body dto.UpsertRouteRequest, userID string) (*dto.Route, error) {
@@ -174,7 +186,7 @@ func (u *siteUsecase) CreateRoute(ctx context.Context, body dto.UpsertRouteReque
 	if err != nil {
 		return nil, err
 	}
-	u.tracker.Log("conn", "", "Rute \""+route.Name+"\" dibuat: "+l.Name+" → "+ul.Name, "info")
+	u.tracker.Log("conn", "", "Rute \""+route.Name+"\" dibuat: "+l.Name+" → "+ul, "info")
 	u.tracker.Changed("sites")
 	return route, nil
 }
@@ -195,7 +207,7 @@ func (u *siteUsecase) UpdateRoute(ctx context.Context, id string, body dto.Upser
 	if err != nil {
 		return nil, err
 	}
-	u.tracker.Log("conn", "", "Rute \""+route.Name+"\" diubah: "+l.Name+" → "+ul.Name, "info")
+	u.tracker.Log("conn", "", "Rute \""+route.Name+"\" diubah: "+l.Name+" → "+ul, "info")
 	u.tracker.Changed("sites")
 	return route, nil
 }
@@ -234,7 +246,7 @@ func (u *siteUsecase) RouteHistory(ctx context.Context, id string, days int) (*d
 	days = min(days, 60)
 	to := time.Now().UnixMilli()
 	from := to - int64(days)*dayMs
-	sites, err := u.siteRepo.SitesByIDs(ctx, []string{route.LoadingID, route.UnloadingID}, true)
+	sites, err := u.siteRepo.SitesByIDs(ctx, route.SiteIDs(), true)
 	if err != nil {
 		return nil, err
 	}

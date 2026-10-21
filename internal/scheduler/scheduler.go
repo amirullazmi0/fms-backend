@@ -174,7 +174,7 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 	if !ok {
 		return 0, nil
 	}
-	sites, err := s.sites.SitesByIDs(ctx, []string{route.LoadingID, route.UnloadingID}, true)
+	sites, err := s.sites.SitesByIDs(ctx, route.SiteIDs(), true)
 	if err != nil || len(sites) < 2 {
 		return 0, err
 	}
@@ -218,10 +218,17 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 		if t.Start < start || t.Start >= end {
 			continue
 		}
-		// loading_* / unloading_* = origin / destination of this trip (back: reversed from the route).
+		// loading_* / unloading_* = origin / destination of this trip: go = pit → the stockpile / jetty
+		// reached (still on the way: the unit's own one), back = that stockpile / jetty → pit.
 		from, to := route.LoadingID, route.UnloadingID
+		if a.UnloadingID != nil {
+			to = *a.UnloadingID
+		}
+		if t.Leg == "go" && t.Unloading != nil {
+			to = t.Unloading.SiteID
+		}
 		if t.Leg != "go" {
-			from, to = route.UnloadingID, route.LoadingID
+			from, to = t.Loading.SiteID, route.LoadingID
 		}
 		loadingName := t.Loading.Name
 		if x, ok := byID[from]; ok {

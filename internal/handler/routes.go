@@ -90,6 +90,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 
 	dispatchUsecase := usecase.NewDispatchUsecase(repository.NewDispatchRepository(db), siteRepo, productionRepo, mdtRepo, liveTracker)
 	dispatchHandler := NewDispatchHandler(dispatchUsecase, shiftUsecase)
+	go usecase.NewAutoDispatcher(dispatchUsecase, shiftUsecase, featureRepo, liveTracker).Run(ctx)
 
 	streamHandler := NewStreamHandler(hub)
 

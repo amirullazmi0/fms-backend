@@ -108,7 +108,7 @@ type Report struct {
 type ReportQuery struct {
 	From   int64  `form:"from"`
 	To     int64  `form:"to"`
-	Group  string `form:"group" validate:"omitempty,oneof=route driver truck shift day hour"`
+	Group  string `form:"group" validate:"omitempty,oneof=route driver truck shift day hour jetty"`
 	Route  string `form:"route" validate:"omitempty,uuid"`
 	Driver string `form:"driver" validate:"omitempty,uuid"`
 	Shift  string `form:"shift" validate:"omitempty,uuid"`

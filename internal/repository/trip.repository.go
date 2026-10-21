@@ -204,8 +204,11 @@ var reportGroups = map[string]groupSQL{
 	"route":  {"COALESCE(t.route_id::text, t.route_name)", "MAX(t.route_name)", "MAX(t.loading_name || ' → ' || t.unloading_name)", "label"},
 	"driver": {"COALESCE(t.driver_id::text, '-')", "COALESCE(MAX(d.name), 'Tanpa operator')", "MAX(d.employee_no)", "label"},
 	"truck":  {"t.imei", "MAX(COALESCE(v.plate, v.name, t.imei))", "MAX(v.vehicle)", "label"},
-	"shift":  {"COALESCE(t.shift_id::text, '-')", "COALESCE(MAX(s.name), 'Tanpa shift')", "MAX(to_char(s.date, 'YYYY-MM-DD'))", "sub DESC, label"},
-	"day":    {"to_char(t.depart_at AT TIME ZONE $TZ, 'YYYY-MM-DD')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'YYYY-MM-DD')", "NULL", "label DESC"},
+	// Per stockpile / jetty: hauling = tujuannya, return = asalnya. sub = rute yang memakainya.
+	"jetty": {"COALESCE((CASE WHEN t.leg = 'go' THEN t.unloading_site_id ELSE t.loading_site_id END)::text, CASE WHEN t.leg = 'go' THEN t.unloading_name ELSE t.loading_name END)",
+		"MAX(CASE WHEN t.leg = 'go' THEN t.unloading_name ELSE t.loading_name END)", "string_agg(DISTINCT t.route_name, ', ')", "label"},
+	"shift": {"COALESCE(t.shift_id::text, '-')", "COALESCE(MAX(s.name), 'Tanpa shift')", "MAX(to_char(s.date, 'YYYY-MM-DD'))", "sub DESC, label"},
+	"day":   {"to_char(t.depart_at AT TIME ZONE $TZ, 'YYYY-MM-DD')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'YYYY-MM-DD')", "NULL", "label DESC"},
 	// Per jam (waktu GPS berangkat dari front loading), key = "YYYY-MM-DD HH".
 	"hour": {"to_char(t.depart_at AT TIME ZONE $TZ, 'YYYY-MM-DD HH24')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'HH24:00')", "to_char(MIN(t.depart_at) AT TIME ZONE $TZ, 'YYYY-MM-DD')", "key"},
 }

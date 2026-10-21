@@ -94,16 +94,16 @@ type StageStats struct {
 
 // StageRow: cycle time per stage of one route (fleet), notes 2.4.
 type StageRow struct {
-	RouteID     string     `json:"routeId"`
-	RouteName   string     `json:"routeName"`
-	Loading     StageStats `json:"loading"`
-	Hauling     float64    `json:"haulingMs"` // go leg (loaded)
-	HaulingN    int        `json:"haulingCount"`
-	Unloading   StageStats `json:"unloading"`
-	Returning   float64    `json:"returningMs"` // back leg (empty)
-	ReturningN  int        `json:"returningCount"`
-	CycleMs     float64    `json:"cycleMs"`     // queue+spot+work at both sites + hauling + returning
-	RitPerHour  float64    `json:"ritPerHour"`  // 60 ÷ CT (minutes)
+	RouteID    string     `json:"routeId"`
+	RouteName  string     `json:"routeName"`
+	Loading    StageStats `json:"loading"`
+	Hauling    float64    `json:"haulingMs"` // go leg (loaded)
+	HaulingN   int        `json:"haulingCount"`
+	Unloading  StageStats `json:"unloading"`
+	Returning  float64    `json:"returningMs"` // back leg (empty)
+	ReturningN int        `json:"returningCount"`
+	CycleMs    float64    `json:"cycleMs"`    // queue+spot+work at both sites + hauling + returning
+	RitPerHour float64    `json:"ritPerHour"` // 60 ÷ CT (minutes)
 }
 
 type StageReport struct {

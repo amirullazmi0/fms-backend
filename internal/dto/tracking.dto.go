@@ -48,27 +48,27 @@ type DevicePos struct {
 }
 
 type Device struct {
-	Imei        string           `json:"imei"`
-	Name        *string          `json:"name"`
-	Plate       *string          `json:"plate"`
-	Vehicle     *string          `json:"vehicle"`
-	PayloadTon  float64          `json:"payloadTon"` // truck factor: ton per rit
-	UnitType    string           `json:"unitType"`   // DT | EX | LV | SUPPORT
+	Imei       string  `json:"imei"`
+	Name       *string `json:"name"`
+	Plate      *string `json:"plate"`
+	Vehicle    *string `json:"vehicle"`
+	PayloadTon float64 `json:"payloadTon"` // truck factor: ton per rit
+	UnitType   string  `json:"unitType"`   // DT | EX | LV | SUPPORT
 	// P2-4: merek & model unit, model tracker (FMC150 / FMC650 / ...), kapasitas bucket (excavator, m³).
-	Brand        *string  `json:"brand"`
-	Model        *string  `json:"model"`
-	TrackerModel *string  `json:"trackerModel"`
-	BucketM3     *float64 `json:"bucketM3"`
-	Online      bool             `json:"online"`
-	Remote      *string          `json:"remote"`
-	ConnectedAt *int64           `json:"connectedAt"`
-	LastSeen    *int64           `json:"lastSeen"`
-	FirstSeen   *int64           `json:"firstSeen"`
-	Last        *AvlHead         `json:"last"`
-	Pos         *DevicePos       `json:"pos"`
-	Io          IoMap            `json:"io"`
-	IoTime      map[string]int64 `json:"ioTime"`
-	Records     int              `json:"records"`
+	Brand        *string          `json:"brand"`
+	Model        *string          `json:"model"`
+	TrackerModel *string          `json:"trackerModel"`
+	BucketM3     *float64         `json:"bucketM3"`
+	Online       bool             `json:"online"`
+	Remote       *string          `json:"remote"`
+	ConnectedAt  *int64           `json:"connectedAt"`
+	LastSeen     *int64           `json:"lastSeen"`
+	FirstSeen    *int64           `json:"firstSeen"`
+	Last         *AvlHead         `json:"last"`
+	Pos          *DevicePos       `json:"pos"`
+	Io           IoMap            `json:"io"`
+	IoTime       map[string]int64 `json:"ioTime"`
+	Records      int              `json:"records"`
 }
 
 type DeviceDetail struct {

@@ -60,6 +60,10 @@ type Scheduler struct {
 
 	loc        *time.Location // report time zone: break times (HH:MM) are local times
 	lastBreaks int64
+
+	zones         repository.SpeedZoneRepository // optional: live overspeed alert
+	overspeedAt   map[string]int64               // imei|zone → last alert
+	lastOverspeed int64
 }
 
 type lateRange struct{ from, to int64 }
@@ -384,6 +388,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 	}
 	s.checkQueues(ctx, now)
 	s.checkBreaks(ctx, now)
+	s.checkOverspeed(ctx, now)
 
 	// Safety net: a stay can only be "inside" while its shift runs.
 	if s.visits != nil {

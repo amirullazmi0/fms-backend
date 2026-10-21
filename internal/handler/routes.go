@@ -45,6 +45,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 	roadRepo := repository.NewRoadRepository(db)
 	productionRepo := repository.NewProductionRepository(db)
 	mdtRepo := repository.NewMdtRepository(db)
+	speedZoneRepo := repository.NewSpeedZoneRepository(db)
 
 	// Services
 	hub := sse.NewHub()
@@ -59,7 +60,8 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 		return nil, fmt.Errorf("load place cache: %w", err)
 	}
 	router := routing.New(cfg.Routing.Enabled, cfg.Routing.OSRMURL, cfg.Routing.TruckFactor, routing.NewRoadGraph(cfg.Routing.OverpassURL, cfg.App.DataDir).WithStore(roadRepo))
-	shiftScheduler := scheduler.New(shiftRepo, siteRepo, tripRepo, deviceRepo, driverRepo, liveTracker).WithVisits(visitRepo).WithMdt(mdtRepo).WithLocation(cfg.Report.Location)
+	shiftScheduler := scheduler.New(shiftRepo, siteRepo, tripRepo, deviceRepo, driverRepo, liveTracker).WithVisits(visitRepo).WithMdt(mdtRepo).WithLocation(cfg.Report.Location).
+		WithSpeedZones(speedZoneRepo)
 
 	// Usecases & handlers
 	userUsecase := usecase.NewUserUsecase(userRepo, roleRepo, &cfg.JWT)
@@ -82,6 +84,8 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 
 	mdtUsecase := usecase.NewMdtUsecase(mdtRepo, tripRepo, liveTracker, cfg.Report.TimeZone)
 	mdtHandler := NewMdtHandler(mdtUsecase)
+
+	speedZoneHandler := NewSpeedZoneHandler(usecase.NewSpeedZoneUsecase(speedZoneRepo, liveTracker, &cfg.Report))
 
 	dispatchUsecase := usecase.NewDispatchUsecase(repository.NewDispatchRepository(db), siteRepo, productionRepo, mdtRepo, liveTracker)
 	dispatchHandler := NewDispatchHandler(dispatchUsecase, shiftUsecase)
@@ -329,6 +333,15 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			simulation.POST("/stop", featureHandler.StopSimulation)
 		}
 
+		zones := api.Group("/speed-zones")
+		zones.Use(auth)
+		{
+			zones.GET("", can(model.PermissionReportRead, model.PermissionDeviceRead), speedZoneHandler.List)
+			zones.POST("", can(model.PermissionSpeedZoneManage), speedZoneHandler.Create)
+			zones.PUT("/:id", can(model.PermissionSpeedZoneManage), speedZoneHandler.Update)
+			zones.DELETE("/:id", can(model.PermissionSpeedZoneManage), speedZoneHandler.Delete)
+		}
+
 		dispatch := api.Group("/dispatch")
 		dispatch.Use(auth)
 		{
@@ -349,6 +362,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			reports.GET("/stages", productionHandler.Stages)
 			reports.GET("/availability", productionHandler.Availability)
 			reports.GET("/heatmap", productionHandler.Heatmap)
+			reports.GET("/overspeed", speedZoneHandler.Report)
 		}
 
 		// Target produksi per rute: semua yang bisa baca laporan boleh lihat, ubah butuh target.manage.

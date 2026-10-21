@@ -749,3 +749,32 @@ model FleetLoader {
   @@index([routeId, startAt], map: "fleet_loaders_route")
   @@map("fleet_loaders")
 }
+
+enum SpeedZoneKind {
+  downhill
+  crossing
+  barge
+  other
+
+  @@map("speed_zone_kind")
+}
+
+/// Zona batas kecepatan (turunan, crossing, area tongkang). Melebihi limitKmh di dalam radius = overspeed.
+model SpeedZone {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String        @db.VarChar(60)
+  kind      SpeedZoneKind @default(other)
+  lat       Float
+  lng       Float
+  radiusM   Int           @default(100) @map("radius_m")
+  limitKmh  Int           @map("limit_kmh")
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime      @default(now()) @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  createdBy String?       @map("created_by") @db.Uuid
+  updatedBy String?       @map("updated_by") @db.Uuid
+  deletedBy String?       @map("deleted_by") @db.Uuid
+
+  @@map("speed_zones")
+}

@@ -114,8 +114,7 @@ func (r *deviceRepository) SetDeviceMeta(ctx context.Context, imei string, m dto
 	ub := database.NewUpdateBuilder("devices").
 		Set("name", m.Name).
 		Set("plate", m.Plate).
-		Set("vehicle", m.Vehicle).
-		Where("imei = $1", imei)
+		Set("vehicle", m.Vehicle)
 	if m.PayloadTon != nil {
 		ub.Set("payload_ton", *m.PayloadTon)
 	}
@@ -139,6 +138,8 @@ func (r *deviceRepository) SetDeviceMeta(ctx context.Context, imei string, m dto
 	} else {
 		ub.SetRaw("updated_at", "CURRENT_TIMESTAMP")
 	}
+	// Where after every Set: its placeholder is numbered after the SET values.
+	ub.Where("imei = $1", imei)
 	_, err := ub.ExecuteContext(ctx, r.db)
 	return err
 }

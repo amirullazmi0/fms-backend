@@ -3,6 +3,7 @@
 //
 //	go run ./cmd/simulator [devices=2] [host=127.0.0.1] [port=DEVICE_PORT] [intervalSeconds=3]
 //
+// devices = all units: 1 EX per 5, 1 LV and 1 SUPPORT per 10, the rest DT (simulator.Mix).
 // SIM_LOOP=1: unassigned trucks loop around central Jakarta instead of parking.
 // SIM_BLANKSPOT=1: signal only near the loading site, data arrives late in bulk.
 // SIM_QUEUE=1: trucks queue before a busy loading / dumping spot.
@@ -31,6 +32,7 @@ func main() {
 			o.Devices = n
 		}
 	}
+	o.Excavators, o.LightVehicles, o.Supports = simulator.Mix(o.Devices)
 	cfg, cfgErr := config.LoadConfig()
 	if cfgErr == nil {
 		o.Port, o.DataDir, o.OverpassURL = cfg.Device.Port, cfg.App.DataDir, cfg.Routing.OverpassURL

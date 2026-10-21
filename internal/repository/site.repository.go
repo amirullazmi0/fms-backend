@@ -13,15 +13,25 @@ import (
 	"github.com/lib/pq"
 )
 
-// FinishingTrip: the assignment's last ritase left front loading before the shift closed and is not
-// finished yet: still hauling to dumping, or already at dumping but not done dumping (has not left
-// the dumping radius). The unit finishes that ritase including dumping (max 6 h, the scheduler's
-// late-arrival window), then it is done. Mirrored in the simulator (pkg/simulator).
-// Aliases: a = assignment, sh = its (closed) shift.
-const FinishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go'
-	AND t.depart_at <= sh.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id)
+// FinishingTrip: the unit still finishes its last ritase after the shift closed, then it is done:
+//   - the last ritase is not finished yet: still hauling to dumping, or already at dumping but not
+//     done dumping (has not left the dumping radius). Max 6 h, the scheduler's late-arrival window.
+//     It left front loading before the close, or it is the one extra ritase below;
+//   - the unit was returning to front loading or loading when the shift closed: it loads once
+//     more, hauls and dumps (the extra ritase). Only while it leaves front loading within an hour
+//     of the close (scheduler extraLoadMs) and does not work in another active shift.
+//
+// Mirrored in the simulator (pkg/simulator). Aliases: a = assignment, sh = its (closed) shift.
+const FinishingTrip = `(EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go'
+	AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id)
 	AND (t.arrive_at IS NULL OR EXISTS (SELECT 1 FROM site_visits sv WHERE sv.assignment_id = a.id
-		AND sv.site_id = t.unloading_site_id AND sv.arrive_at >= t.depart_at AND sv.depart_at IS NULL)))`
+		AND sv.site_id = t.unloading_site_id AND sv.arrive_at >= t.depart_at AND sv.depart_at IS NULL)))
+	OR (sh.closed_at > now() - interval '1 hour'
+	AND EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'back' AND t.depart_at <= sh.closed_at
+		AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id AND t2.depart_at <= sh.closed_at))
+	AND NOT EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.depart_at > sh.closed_at)
+	AND NOT EXISTS (SELECT 1 FROM assignments a2 JOIN shifts s2 ON s2.id = a2.shift_id AND s2.status = 'active'
+		AND s2.deleted_at IS NULL WHERE a2.imei = a.imei AND a2.end_at IS NULL)))`
 
 // onDuty = what trucks are working on: an active shift (phase active), or a closed shift whose
 // last ritase is still heading to unloading (phase finishing).

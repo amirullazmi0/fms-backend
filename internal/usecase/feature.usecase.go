@@ -110,7 +110,61 @@ func validSimulation(raw json.RawMessage) error {
 	if c.Interval < 1 || c.Interval > 60 {
 		return apperror.BadRequest("Interval kirim data 1–60 detik")
 	}
+	others := 0
+	for _, n := range []*int{c.Excavators, c.LightVehicles, c.Supports} {
+		if n != nil {
+			if *n < 0 {
+				return apperror.BadRequest("Jumlah EX / LV / SUPPORT tidak boleh negatif")
+			}
+			others += *n
+		}
+	}
+	if others > c.Devices {
+		return apperror.BadRequest("Jumlah EX + LV + SUPPORT melebihi jumlah unit")
+	}
 	return nil
+}
+
+// simulationMix: the EX / LV / SUPPORT counts of a run (default composition when not set).
+func simulationMix(c dto.SimulationConfig) (ex, lv, sup int) {
+	ex, lv, sup = simulator.Mix(c.Devices)
+	if c.Excavators != nil {
+		ex = *c.Excavators
+	}
+	if c.LightVehicles != nil {
+		lv = *c.LightVehicles
+	}
+	if c.Supports != nil {
+		sup = *c.Supports
+	}
+	return ex, lv, sup
+}
+
+// registerUnits sets the unit type of the fake devices (and a name while they have none), so
+// EX / LV / SUPPORT show as such on the dashboard.
+func (u *featureUsecase) registerUnits(ctx context.Context, units []simulator.Unit, by string) {
+	cur := map[string]dto.Device{}
+	for _, d := range u.tracker.Devices() {
+		cur[d.Imei] = d
+	}
+	for _, x := range units {
+		d, ok := cur[x.Imei]
+		kind := string(x.Kind)
+		req := dto.UpdateDeviceRequest{}
+		if !ok || d.UnitType != kind {
+			req.UnitType = &kind
+		}
+		if !ok || d.Name == nil {
+			name := x.Name
+			req.Name = &name
+		}
+		if req.UnitType == nil && req.Name == nil {
+			continue
+		}
+		if _, err := u.tracker.UpdateMeta(ctx, x.Imei, req, by); err != nil {
+			logger.Warn("simulator: gagal set jenis unit " + x.Imei + ": " + err.Error())
+		}
+	}
 }
 
 // simulationFeature: the feature row and its config (with defaults).
@@ -175,9 +229,13 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 	u.startedAt, u.startedBy = time.Now().UnixMilli(), actor.ID
 	u.mu.Unlock()
 
+	ex, lv, sup := simulationMix(c)
 	opts := simulator.Options{
-		Devices:     c.Devices,
-		Interval:    c.Interval,
+		Devices:       c.Devices,
+		Excavators:    ex,
+		LightVehicles: lv,
+		Supports:      sup,
+		Interval:      c.Interval,
 		Loop:        c.Loop,
 		BlankSpot:   c.BlankSpot,
 		Queue:       c.Queue,
@@ -191,6 +249,8 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 			logger.Info("simulator: " + fmt.Sprintf(format, args...))
 		},
 	}
+	units := simulator.Units(opts)
+	u.registerUnits(ctx, units, actor.ID)
 	go func() {
 		defer close(done)
 		if err := simulator.Run(runCtx, opts); err != nil {
@@ -205,8 +265,13 @@ func (u *featureUsecase) StartSimulation(ctx context.Context, actor *model.Actor
 	}()
 
 	u.setRunning(ctx, true, actor.ID)
-	logger.Info(fmt.Sprintf("Simulasi berjalan: %d unit, setiap %d detik", c.Devices, c.Interval))
-	u.tracker.Notice("info", "Simulasi berjalan", fmt.Sprintf("%d unit simulasi terhubung ke server, mengirim data setiap %d detik.", c.Devices, c.Interval), "")
+	kinds := map[simulator.UnitKind]int{}
+	for _, x := range units {
+		kinds[x.Kind]++
+	}
+	mix := fmt.Sprintf("%d DT, %d EX, %d LV, %d SUPPORT", kinds[simulator.DT], kinds[simulator.EX], kinds[simulator.LV], kinds[simulator.SUPPORT])
+	logger.Info(fmt.Sprintf("Simulasi berjalan: %d unit (%s), setiap %d detik", len(units), mix, c.Interval))
+	u.tracker.Notice("info", "Simulasi berjalan", fmt.Sprintf("%d unit simulasi (%s) terhubung ke server, mengirim data setiap %d detik.", len(units), mix, c.Interval), "")
 	u.tracker.Changed("simulation")
 	return u.status(true, c), nil
 }

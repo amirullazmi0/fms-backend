@@ -32,6 +32,9 @@ const (
 	tickEvery     = time.Minute
 	finishingMs   = 60_000
 	claimSlackMs  = 30 * 60_000 // a stay may start this long before the assignment
+	// extraLoadMs: a unit returning to / loading at front loading when the shift closed must leave
+	// front loading within this long to still finish one more ritase (repository.FinishingTrip).
+	extraLoadMs = 3600_000
 	recomputeMs   = 5 * 60_000
 	recordLimit   = 200000
 )
@@ -189,6 +192,26 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 		byID[x.ID] = x
 	}
 
+	// Returning to front loading or still loading when the shift closed: the unit loads once more
+	// and finishes that ritase (repository.FinishingTrip), so it still belongs here.
+	if a.EndAt == nil && shift.ClosedAt != nil && end == *shift.ClosedAt {
+		lastLeg, lastStart, extra := "", int64(0), int64(-1)
+		for _, t := range rep.Trips {
+			if t.Start >= start && t.Start < end && t.Start >= lastStart {
+				lastLeg, lastStart = t.Leg, t.Start
+			}
+			if t.Leg == "go" && t.Start >= end && t.Start < end+extraLoadMs && (extra < 0 || t.Start < extra) {
+				extra = t.Start
+			}
+		}
+		if lastLeg == "back" && extra >= 0 {
+			// Not when the unit already works in another shift by then (no ritase counted twice).
+			if other, err := s.shifts.ShiftsTouching(ctx, a.Imei, extra, extra, 0); err == nil && !touchesOther(other, shift.ID) {
+				end = extra + 1
+			}
+		}
+	}
+
 	payload := s.tracker.PayloadTon(a.Imei)
 	out := []dto.TripUpsert{}
 	for _, t := range rep.Trips {
@@ -249,6 +272,15 @@ func (s *Scheduler) computeAssignment(ctx context.Context, shift dto.Shift, a dt
 	}
 	n, err := s.visits.ReplaceVisits(ctx, a.ID, visitsOf(records, shift, a, route, sites, start, end, lastArrival))
 	return changed + n, err
+}
+
+func touchesOther(shifts []dto.Shift, id string) bool {
+	for _, x := range shifts {
+		if x.ID != id {
+			return true
+		}
+	}
+	return false
 }
 
 // visitsOf: stays at the route's loading/unloading sites during the assignment. Passing

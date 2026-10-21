@@ -6,6 +6,12 @@
 // ALONG ROADS (OpenStreetMap), stopping ~3 minutes at each site. Routes are read from the
 // database every 20 s, so changing a route needs no restart. Unassigned trucks park with
 // the engine off. SIM_LOOP=1: unassigned trucks loop around central Jakarta instead.
+// A stopped shift: each truck finishes its ritase (still loading or returning: it loads once
+// more), dumps, then parks.
+//
+// The other kinds follow the routes in use: EX works at front loading (of its fleet when set
+// in Fleet → excavator), LV drives between front loading and dumping, SUPPORT drives the
+// haul road slowly.
 //
 // Port of fmctest/server/simulator.ts.
 package simulator
@@ -192,9 +198,32 @@ type routeInfo struct {
 	finish bool
 }
 
+// UnitKind is the unit type of a fake device (devices.unit_type).
+type UnitKind string
+
+const (
+	DT      UnitKind = "DT"      // dump truck: hauls its shift route
+	EX      UnitKind = "EX"      // excavator: works at front loading
+	LV      UnitKind = "LV"      // light vehicle: drives between front loading and dumping
+	SUPPORT UnitKind = "SUPPORT" // grader / water truck: drives the haul road slowly
+)
+
+// imeiBase: the IMEI number of the first unit of each kind (DT keeps 1, 2, … as before).
+var imeiBase = map[UnitKind]int{DT: 1, EX: 101, LV: 201, SUPPORT: 301}
+
+// Unit is one fake device of a run.
+type Unit struct {
+	Imei string
+	Kind UnitKind
+	Name string // shown while the device has no name of its own
+}
+
 type fakeDevice struct {
 	mu         sync.Mutex
 	imei       string
+	kind       UnitKind
+	working    bool // EX: at front loading, engine on
+	heading    int  // EX: swing direction
 	path       *path // nil = parked (no route)
 	here       latLng
 	routeKey   string
@@ -224,21 +253,66 @@ type fakeDevice struct {
 	waiting    bool                  // queue mode: waiting for a spot
 }
 
-func newDevice(n int) *fakeDevice {
+func imeiOf(n int) string { return "35" + fmt.Sprintf("%013d", n) }
+
+// Units lists the fake devices of a run: DT first, then EX, LV and SUPPORT.
+func Units(o Options) []Unit {
+	o = withDefaults(o)
+	out := []Unit{}
+	add := func(kind UnitKind, count int) {
+		for i := range count {
+			name := fmt.Sprintf("%s-SIM %02d", kind, i+1)
+			out = append(out, Unit{Imei: imeiOf(imeiBase[kind] + i), Kind: kind, Name: name})
+		}
+	}
+	add(DT, o.Devices-o.Excavators-o.LightVehicles-o.Supports)
+	add(EX, o.Excavators)
+	add(LV, o.LightVehicles)
+	add(SUPPORT, o.Supports)
+	return out
+}
+
+func newDevice(n int, kind UnitKind) *fakeDevice {
 	d := &fakeDevice{
-		imei:      "35" + fmt.Sprintf("%013d", n),
+		imei:      imeiOf(n),
+		kind:      kind,
 		here:      loopRoute[(n*5)%len(loopRoute)],
 		ign:       true,
 		odometer:  125000000 + float64(n)*7300000,
-		fuel:      450 - float64(n)*60,
+		fuel:      450 - float64(n%6)*60,
 		fuelUsed:  8000,
 		ibutton:   float64(0x0100_0000_0000 + n*0x1234_5678),
 		cargoTemp: 50,
 	}
-	if simLoop {
+	if simLoop && kind != EX {
 		d.path, d.routeKey, d.seg = loopPath, "loop", (n*5)%len(loopRoute)
 	}
 	return d
+}
+
+// setSite puts an EX at the front loading of r (nil = no work: parked, engine off). Each EX
+// stands a little apart so several on one front do not overlap.
+func (d *fakeDevice) setSite(r *routeInfo) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := ""
+	if r != nil {
+		key = fmt.Sprintf("ex|%s|%v", r.id, r.l)
+	}
+	if key == d.routeKey {
+		return
+	}
+	d.routeKey = key
+	if r == nil {
+		d.working, d.ign, d.speed = false, false, 0
+		d.logf("tidak ada front loading, parkir di tempat")
+		return
+	}
+	n, _ := strconv.Atoi(d.imei[len(d.imei)-3:])
+	deg := (n * 137) % 360 // stable per unit
+	d.here = latLng{r.l[0] + 0.0002*math.Cos(rad(float64(deg))), r.l[1] + 0.0002*math.Sin(rad(float64(deg)))}
+	d.working, d.ign, d.heading = true, true, deg
+	d.logf("bekerja di front loading rute %q", r.name)
 }
 
 func (d *fakeDevice) logf(format string, args ...any) {
@@ -336,7 +410,7 @@ func (d *fakeDevice) releaseSpot() {
 
 // mustQueue: queue mode, the next stop is a spot held by another truck and it is close.
 func (d *fakeDevice) mustQueue() bool {
-	if !queueMode || d.path == nil {
+	if !queueMode || d.kind != DT || d.path == nil {
 		return false
 	}
 	next := d.next(d.seg)
@@ -358,9 +432,33 @@ func (d *fakeDevice) covered() bool {
 	return distM(d.position(), d.path.points[d.path.loopFrom]) <= coverageM
 }
 
+// stepExcavator: an EX at front loading stands still with the engine on and swings.
+func (d *fakeDevice) stepExcavator(dt float64) {
+	d.speed = 0
+	if !d.working {
+		d.ign = false
+		return
+	}
+	d.ign = true
+	d.heading = (d.heading + int(rnd(-90, 90)) + 360) % 360
+	burn := dt * 0.07 // ~25 L/h
+	d.fuel = math.Max(40, d.fuel-burn)
+	d.fuelUsed += burn
+	if d.fuel <= 40 {
+		d.fuel = 500 // refuel (fuel truck)
+	}
+}
+
 func (d *fakeDevice) step(dt float64) *greenEvent {
-	depotTicks := int(math.Ceil(180 / float64(interval))) // ~3 minutes loading/unloading
-	if queueMode {
+	stopS := 180.0 // ~3 minutes loading/unloading
+	switch d.kind {
+	case LV:
+		stopS = 30 // a short check at the site
+	case SUPPORT:
+		stopS = 20
+	}
+	depotTicks := int(math.Ceil(stopS / float64(interval)))
+	if queueMode && d.kind == DT {
 		depotTicks *= 2 // longer loading so queues happen with a few trucks
 	}
 	d.tick++
@@ -374,6 +472,10 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 	// Engine cut active: engine off, truck stops.
 	if d.dout1 != 0 {
 		d.ign, d.speed = false, 0
+		return nil
+	}
+	if d.kind == EX {
+		d.stepExcavator(dt)
 		return nil
 	}
 	if d.path == nil {
@@ -394,8 +496,8 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 			d.exitFrom = &at
 			d.logf("dumping terakhir selesai, keluar dari area dumping")
 		}
-		if d.depotTicks > 2 {
-			d.door = 1
+		if d.depotTicks > 2 && d.kind == DT {
+			d.door = 1 // tipper
 		} else {
 			d.door = 0
 		}
@@ -445,7 +547,15 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 	}
 
 	target := rnd(15, 65)
-	if rand.Float64() < 0.08 {
+	switch {
+	case d.kind == SUPPORT:
+		target = rnd(8, 20) // grader / water truck: slow, no overspeed
+	case d.kind == LV:
+		target = rnd(30, 60)
+		if rand.Float64() < 0.05 {
+			target = rnd(82, 95)
+		}
+	case rand.Float64() < 0.08:
 		target = rnd(82, 95)
 	}
 	var ev *greenEvent
@@ -479,7 +589,7 @@ func (d *fakeDevice) step(dt float64) *greenEvent {
 			if d.path.depots[d.seg] {
 				d.depotTicks = depotTicks // stop right at the site
 				move = 0
-				if queueMode {
+				if queueMode && d.kind == DT {
 					d.spot = spotKey(d.path.points[d.seg])
 					spots.Store(d.spot, d.imei)
 				}
@@ -512,6 +622,8 @@ func (d *fakeDevice) record(ev *greenEvent) teltonika.OutRecord {
 		rpm = 780
 		if moving {
 			rpm = 900 + float64(speed)*32
+		} else if d.kind == EX {
+			rpm = rnd(1500, 1900) // digging / swinging
 		}
 	}
 	ext := rnd(12300, 12600)
@@ -548,7 +660,9 @@ func (d *fakeDevice) record(ev *greenEvent) teltonika.OutRecord {
 	}
 
 	angle := 0
-	if a == b {
+	if d.kind == EX {
+		angle = d.heading
+	} else if a == b {
 		if d.lastRec != nil {
 			angle = d.lastRec.Angle
 		}
@@ -600,7 +714,7 @@ func (d *fakeDevice) send(c net.Conn) error {
 	d.mu.Lock()
 	ev := d.step(float64(interval))
 	parkedEvery := max(1, int(math.Round(60/float64(interval))))
-	if d.path == nil && d.tick%parkedEvery != 1 {
+	if d.path == nil && !d.ign && d.tick%parkedEvery != 1 {
 		d.mu.Unlock()
 		return nil // parked: send rarely, like a real device
 	}
@@ -723,34 +837,44 @@ func (d *fakeDevice) session(ctx context.Context) {
 	}
 }
 
-// finishingTrip mirrors repository.FinishingTrip (s = the closed shift): the assignment's last
-// ritase left front loading before the close and is not finished yet (still hauling, or still at dumping).
-const finishingTrip = `EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go'
-	AND t.depart_at <= s.closed_at AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id)
+// finishingTrip mirrors repository.FinishingTrip (sh = the closed shift): the last ritase is not
+// finished yet (still hauling, or still at dumping), or the truck was returning to / loading at
+// front loading when the shift closed and loads once more, hauls and dumps.
+const finishingTrip = `(EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'go'
+	AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id)
 	AND (t.arrive_at IS NULL OR EXISTS (SELECT 1 FROM site_visits sv WHERE sv.assignment_id = a.id
-		AND sv.site_id = t.unloading_site_id AND sv.arrive_at >= t.depart_at AND sv.depart_at IS NULL)))`
+		AND sv.site_id = t.unloading_site_id AND sv.arrive_at >= t.depart_at AND sv.depart_at IS NULL)))
+	OR (sh.closed_at > now() - interval '1 hour'
+	AND EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.leg = 'back' AND t.depart_at <= sh.closed_at
+		AND t.depart_at = (SELECT max(t2.depart_at) FROM trips t2 WHERE t2.assignment_id = a.id AND t2.depart_at <= sh.closed_at))
+	AND NOT EXISTS (SELECT 1 FROM trips t WHERE t.assignment_id = a.id AND t.depart_at > sh.closed_at)
+	AND NOT EXISTS (SELECT 1 FROM assignments a2 JOIN shifts s2 ON s2.id = a2.shift_id AND s2.status = 'active'
+		AND s2.deleted_at IS NULL WHERE a2.imei = a.imei AND a2.end_at IS NULL)))`
 
-// syncRoutes reads each simulated truck's route from the active shift assignments.
+// syncRoutes reads each simulated truck's route from the active shift assignments. The other
+// units follow the routes in use: EX at front loading, LV and SUPPORT on the haul road.
 func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
-	imeis := make([]string, len(fleet))
-	for i, d := range fleet {
-		imeis[i] = d.imei
+	imeis := []string{}
+	for _, d := range fleet {
+		if d.kind == DT {
+			imeis = append(imeis, d.imei)
+		}
 	}
 	warned := false
 	for {
 		rows, err := database.NewQueryBuilder("assignments a").
-			// Active shift, or a stopped one whose last ritase still heads to unloading (finish it).
-			Select("DISTINCT ON (a.imei) a.imei", "r.id", "r.name", "l.lat", "l.lng", "u.lat", "u.lng", "s.status = 'closed'").
-			InnerJoin("shifts s", `s.id = a.shift_id AND s.deleted_at IS NULL AND (s.status = 'active' OR (s.status = 'closed'
-				AND s.closed_at > now() - interval '6 hours' AND `+finishingTrip+`))`).
+			// Active shift, or a stopped one whose last ritase is not finished yet (finish it).
+			Select("DISTINCT ON (a.imei) a.imei", "r.id", "r.name", "l.lat", "l.lng", "u.lat", "u.lng", "sh.status = 'closed'").
+			InnerJoin("shifts sh", `sh.id = a.shift_id AND sh.deleted_at IS NULL AND (sh.status = 'active' OR (sh.status = 'closed'
+				AND sh.closed_at > now() - interval '6 hours' AND `+finishingTrip+`))`).
 			InnerJoin("routes r", "r.id = a.route_id").
 			InnerJoin("sites l", "l.id = r.loading_site_id").
 			InnerJoin("sites u", "u.id = r.unloading_site_id").
 			WhereNull("a.end_at").
 			Where("a.imei = ANY($1::text[])", pq.Array(imeis)).
 			OrderBy("a.imei").
-			OrderBy("s.status = 'closed'"). // an active assignment wins over finishing an old one
-			OrderBy("COALESCE(a.start_at, s.started_at) DESC").
+			OrderBy("sh.status = 'closed'"). // an active assignment wins over finishing an old one
+			OrderBy("COALESCE(a.start_at, sh.started_at) DESC").
 			ExecuteContext(ctx, db)
 		if err != nil {
 			if !warned {
@@ -769,8 +893,11 @@ func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 			}
 			_ = rows.Close()
 			for _, d := range fleet {
-				go d.setRoute(ctx, by[d.imei])
+				if d.kind == DT {
+					go d.setRoute(ctx, by[d.imei])
+				}
 			}
+			syncOthers(ctx, db, fleet)
 		}
 		select {
 		case <-ctx.Done():
@@ -780,9 +907,103 @@ func syncRoutes(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
 	}
 }
 
+// syncOthers places the EX, LV and SUPPORT units. An EX works at the front loading of its fleet
+// (Fleet → excavator), else of a route in use. LV and SUPPORT drive the routes in use (one route
+// each, in turn). No route in use: they park (LV / SUPPORT loop with Loop).
+func syncOthers(ctx context.Context, db *sql.DB, fleet []*fakeDevice) {
+	imeis := []string{}
+	for _, d := range fleet {
+		if d.kind != DT {
+			imeis = append(imeis, d.imei)
+		}
+	}
+	if len(imeis) == 0 {
+		return
+	}
+	// scan reads route rows, each optionally prefixed by an imei.
+	scan := func(rows *sql.Rows, withImei bool) ([]string, []*routeInfo) {
+		var keys []string
+		var out []*routeInfo
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var imei string
+			var r routeInfo
+			dest := []any{&r.id, &r.name, &r.l[0], &r.l[1], &r.u[0], &r.u[1]}
+			if withImei {
+				dest = append([]any{&imei}, dest...)
+			}
+			if rows.Scan(dest...) == nil {
+				keys, out = append(keys, imei), append(out, &r)
+			}
+		}
+		return keys, out
+	}
+	rows, err := database.NewQueryBuilder("routes r").
+		Select("r.id", "r.name", "l.lat", "l.lng", "u.lat", "u.lng").
+		InnerJoin("sites l", "l.id = r.loading_site_id").
+		InnerJoin("sites u", "u.id = r.unloading_site_id").
+		WhereNull("r.deleted_at").
+		Where(`EXISTS (SELECT 1 FROM assignments a JOIN shifts sh ON sh.id = a.shift_id AND sh.status = 'active'
+			AND sh.deleted_at IS NULL WHERE a.route_id = r.id AND a.end_at IS NULL)`).
+		OrderBy("r.name").
+		OrderBy("r.id").
+		ExecuteContext(ctx, db)
+	if err != nil {
+		return
+	}
+	_, inUse := scan(rows, false)
+	rows, err = database.NewQueryBuilder("fleet_loaders fl").
+		Select("DISTINCT ON (fl.imei) fl.imei", "r.id", "r.name", "l.lat", "l.lng", "u.lat", "u.lng").
+		InnerJoin("routes r", "r.id = fl.route_id AND r.deleted_at IS NULL").
+		InnerJoin("sites l", "l.id = r.loading_site_id").
+		InnerJoin("sites u", "u.id = r.unloading_site_id").
+		WhereNull("fl.end_at").
+		Where("fl.imei = ANY($1::text[])", pq.Array(imeis)).
+		OrderBy("fl.imei").
+		OrderBy("fl.start_at DESC").
+		ExecuteContext(ctx, db)
+	if err != nil {
+		return
+	}
+	keys, list := scan(rows, true)
+	loaders := map[string]*routeInfo{}
+	for i, k := range keys {
+		loaders[k] = list[i]
+	}
+
+	nth := func(i int) *routeInfo {
+		if len(inUse) == 0 {
+			return nil
+		}
+		return inUse[i%len(inUse)]
+	}
+	count := map[UnitKind]int{}
+	for _, d := range fleet {
+		i := count[d.kind]
+		count[d.kind]++
+		switch d.kind {
+		case EX:
+			r := loaders[d.imei]
+			if r == nil {
+				r = nth(i)
+			}
+			d.setSite(r)
+		case LV:
+			go d.setRoute(ctx, nth(i))
+		case SUPPORT:
+			go d.setRoute(ctx, nth(i+1))
+		}
+	}
+}
+
 // Options for one simulator run.
 type Options struct {
-	Devices     int    // number of fake trucks (default 2)
+	Devices     int    // number of fake units, all kinds (default 2)
+	// Of Devices: excavators, light vehicles and support units (grader / water truck); the
+	// rest are dump trucks. See Mix for a default composition.
+	Excavators    int
+	LightVehicles int
+	Supports      int
 	Host        string // device TCP host (default 127.0.0.1)
 	Port        string // device TCP port (default 3101)
 	Interval    int    // seconds between records (default 3)
@@ -797,6 +1018,25 @@ type Options struct {
 	// RoadStore keeps computed road paths (nil = files under DataDir/roads).
 	RoadStore routing.Store
 	Logf      func(format string, args ...any)
+}
+
+// Mix is the default composition of n units: 1 EX per 5, 1 LV and 1 SUPPORT per 10
+// (10 units = 6 DT, 2 EX, 1 LV, 1 SUPPORT).
+func Mix(n int) (excavators, lightVehicles, supports int) {
+	return n / 5, n / 10, n / 10
+}
+
+// withDefaults fills the device count and keeps the other kinds within it.
+func withDefaults(o Options) Options {
+	if o.Devices <= 0 {
+		o.Devices = 2
+	}
+	left := o.Devices
+	for _, n := range []*int{&o.Excavators, &o.LightVehicles, &o.Supports} {
+		*n = max(0, min(*n, left))
+		left -= *n
+	}
+	return o
 }
 
 // ErrRunning is returned by Run while another run is active.
@@ -836,15 +1076,12 @@ func Run(ctx context.Context, o Options) error {
 	if o.RoadStore != nil {
 		graph.WithStore(o.RoadStore)
 	}
-	count := o.Devices
-	if count <= 0 {
-		count = 2
-	}
-
 	var wg sync.WaitGroup
-	fleet := make([]*fakeDevice, count)
-	for i := range fleet {
-		fleet[i] = newDevice(i + 1)
+	units := Units(o)
+	fleet := make([]*fakeDevice, len(units))
+	for i, u := range units {
+		n, _ := strconv.Atoi(u.Imei[2:])
+		fleet[i] = newDevice(n, u.Kind)
 	}
 	// Continue where each truck last was (a server restart must not teleport the trucks
 	// and cut their ritase in half).

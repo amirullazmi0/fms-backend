@@ -20,9 +20,13 @@ type UpdateFeatureRequest struct {
 
 // SimulationConfig is the config of the "simulation" feature.
 type SimulationConfig struct {
-	Devices  int  `json:"devices"`
+	Devices  int  `json:"devices"` // all units
 	Interval int  `json:"interval"`
 	Loop     bool `json:"loop"`
+	// Of Devices: EX, LV and SUPPORT units, the rest DT. nil = default composition (simulator.Mix).
+	Excavators    *int `json:"excavators,omitempty"`
+	LightVehicles *int `json:"lightVehicles,omitempty"`
+	Supports      *int `json:"supports,omitempty"`
 	// BlankSpot: no signal away from the loading site; records are kept on the device and
 	// sent in bulk when the truck is back in coverage (Teltonika store and forward).
 	BlankSpot bool `json:"blankSpot"`

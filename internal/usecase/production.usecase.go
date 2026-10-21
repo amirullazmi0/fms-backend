@@ -33,6 +33,7 @@ type ProductionUsecase interface {
 	Freshness(ctx context.Context) ([]dto.Freshness, error)
 	Stages(ctx context.Context, q dto.ReportQuery) (*dto.StageReport, error)
 	Availability(ctx context.Context, q dto.AvailabilityQuery) (*dto.AvailabilityReport, error)
+	Heatmap(ctx context.Context, q dto.HeatmapQuery) (*dto.HeatmapReport, error)
 }
 
 type productionUsecase struct {

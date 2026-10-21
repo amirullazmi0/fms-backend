@@ -348,6 +348,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 			reports.GET("/freshness", productionHandler.Freshness)
 			reports.GET("/stages", productionHandler.Stages)
 			reports.GET("/availability", productionHandler.Availability)
+			reports.GET("/heatmap", productionHandler.Heatmap)
 		}
 
 		// Target produksi per rute: semua yang bisa baca laporan boleh lihat, ubah butuh target.manage.

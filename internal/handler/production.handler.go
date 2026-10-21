@@ -144,6 +144,29 @@ func (h *ProductionHandler) Stages(c *gin.Context) {
 	response.Success(c, http.StatusOK, "Stage report retrieved successfully", r)
 }
 
+// Heatmap godoc
+// @Summary Heat map kecepatan per sel jalan (bermuatan / kosongan) + titik guncangan akselerometer
+// @Tags production
+// @Security BearerAuth
+// @Param from query int false "Start (ms)"
+// @Param to query int false "End (ms)"
+// @Param route query string false "Route id"
+// @Param load query string false "loaded | empty"
+// @Success 200 {object} response.Response{data=dto.HeatmapReport}
+// @Router /api/reports/heatmap [get]
+func (h *ProductionHandler) Heatmap(c *gin.Context) {
+	var q dto.HeatmapQuery
+	if !bindQuery(c, &q) {
+		return
+	}
+	r, err := h.productionUsecase.Heatmap(c.Request.Context(), q)
+	if err != nil {
+		respondError(c, err, "Failed to build heat map")
+		return
+	}
+	response.Success(c, http.StatusOK, "Heat map retrieved successfully", r)
+}
+
 // Availability godoc
 // @Summary PA, UA, MA & EU per unit, per unit type and all units (from the unit status log)
 // @Tags production

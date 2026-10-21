@@ -30,6 +30,9 @@ type ProductionRepository interface {
 	StatusIntervals(ctx context.Context, from, to int64) ([]dto.StatusInterval, error)
 	// AvailabilityUnits: units (not deleted) for the availability report.
 	AvailabilityUnits(ctx context.Context) ([]dto.AvailabilityUnit, error)
+	// Heatmap / Shocks: kecepatan per sel jalan dan titik guncangan (P3-2).
+	Heatmap(ctx context.Context, from, to int64, routeID, leg string, limit int) ([]dto.HeatCell, bool, error)
+	Shocks(ctx context.Context, from, to int64, routeID string, limit int) ([]dto.ShockPoint, error)
 }
 
 type productionRepository struct {

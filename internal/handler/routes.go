@@ -149,6 +149,7 @@ func Router(ctx context.Context, cfg *config.Config, db *sql.DB) (*gin.Engine, e
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "timestamp": time.Now()})
 	})
+	registerFmcSwagger(r)
 
 	auth := middleware.JWTAuth(&cfg.JWT)
 	can := middleware.RequirePermission

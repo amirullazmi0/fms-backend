@@ -1,0 +1,639 @@
+openapi: 3.0.3
+info:
+  title: FMS – Integrasi Tracker FMC150 / FMC650
+  version: "1.0"
+  description: |
+    API HTTP backend FMS yang berhubungan dengan tracker Teltonika **FMC150 / FMC650**:
+    cek tracker yang terhubung, baca data AVL yang masuk, kirim perintah Codec 12, dan pantau log koneksi.
+
+    ## Koneksi tracker → backend (TCP, bukan HTTP)
+    Tracker **tidak** memakai endpoint di halaman ini. Tracker membuka koneksi TCP langsung ke backend:
+
+    | Item | Nilai |
+    |---|---|
+    | Host (staging) | `fms-backend.apps.arulize.com` |
+    | Port | `3101` (`DEVICE_PORT`), protokol **TCP** (jangan UDP) |
+    | Protokol data | Teltonika **Codec 8 / Codec 8 Extended** |
+    | Protokol perintah | Teltonika **Codec 12** (di koneksi TCP yang sama) |
+
+    Alur di koneksi TCP:
+    1. **Handshake IMEI** – tracker kirim 2 byte panjang + IMEI ASCII (15 digit). Server balas `01` (diterima) atau `00` (ditolak).
+       Tracker baru otomatis terdaftar saat pertama kali terhubung.
+    2. **Paket AVL** – `00000000` preamble + panjang data + Codec ID (`08` / `8E`) + record + CRC-16.
+       Server membalas ACK 4 byte berisi jumlah record yang diterima. Record tanpa ACK dikirim ulang oleh tracker.
+    3. **Perintah** – dari dashboard / `POST /api/devices/{imei}/command`, server kirim Codec 12 (`0C`, tipe `05`),
+       tracker membalas Codec 12 tipe `06`. Hanya bisa saat tracker online.
+    4. Koneksi yang diam terlalu lama diputus server; tracker akan reconnect dan mengirim ulang data yang belum di-ACK.
+
+    Konfigurasi tracker lewat SMS (diawali dua spasi):
+    `  setparam 2001:internet;2004:fms-backend.apps.arulize.com;2005:3101;2006:0`
+
+    ## Cara memakai halaman ini
+    1. Jalankan **POST /api/auth/login**, salin `data.access_token`.
+    2. Klik **Authorize**, isi `Bearer <access_token>`.
+    3. Cek **GET /api/status** (port tracker & jumlah terhubung) lalu **GET /api/devices**.
+
+    Semua waktu dalam **epoch milidetik**. Semua respons dibungkus `{ success, message, data, meta?, error? }`.
+servers:
+  - url: /
+    description: Server ini
+tags:
+  - name: auth
+    description: Login untuk mendapat token
+  - name: koneksi
+    description: Status port TCP tracker, log koneksi & IO map
+  - name: devices
+    description: Tracker FMC yang pernah terhubung
+  - name: perintah
+    description: Perintah GPRS Codec 12 ke tracker
+security:
+  - BearerAuth: []
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Login, dapatkan access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { description: Terlalu banyak percobaan (20/menit) }
+
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Perbarui access + refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: Token baru
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AuthResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/status:
+    get:
+      tags: [koneksi]
+      summary: Status server & port TCP tracker
+      description: "Permission: `device.read`. Menunjukkan port tracker, alamat publik (tunnel / TUNNEL_HOST) dan jumlah tracker terhubung."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ServerStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/logs:
+    get:
+      tags: [koneksi]
+      summary: Log koneksi tracker (handshake, paket mentah, ACK, error)
+      description: "Permission: `log.read`. Ring buffer di memori, terlama dulu."
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 1000 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/LogEntry" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/events:
+    get:
+      tags: [koneksi]
+      summary: 200 event armada terakhir (online/offline, ignition, dll.)
+      description: "Permission: `device.read`."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/FleetEvent" }
+
+  /api/io-map:
+    get:
+      tags: [koneksi]
+      summary: Kamus AVL IO ID Teltonika (ID → nama & satuan)
+      description: "Permission: `device.read`. Dipakai untuk membaca field `io` di record."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          io: { type: object, additionalProperties: true }
+                          groups: { type: array, items: { type: object } }
+
+  /api/devices:
+    get:
+      tags: [devices]
+      summary: Status live semua tracker
+      description: "Permission: `device.read`."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Device" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/devices/{imei}:
+    parameters:
+      - $ref: "#/components/parameters/Imei"
+    get:
+      tags: [devices]
+      summary: Satu tracker + riwayat posisi terakhir
+      description: "Permission: `device.read`."
+      parameters:
+        - name: limit
+          in: query
+          description: Jumlah titik riwayat (maks 3000)
+          schema: { type: integer, default: 1000, maximum: 3000 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DeviceDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [devices]
+      summary: Lengkapi data unit (plat, nama, jenis, tracker model, dll.)
+      description: "Permission: `device.update`. Field yang tidak dikirim tidak diubah; string kosong mengosongkan brand/model/trackerModel."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateDeviceRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [devices]
+      summary: Hapus tracker (soft delete; terdaftar lagi bila terhubung kembali)
+      description: "Permission: `device.delete`."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          imei: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/devices/{imei}/records:
+    get:
+      tags: [devices]
+      summary: Record AVL dalam rentang waktu (terlama dulu)
+      description: "Permission: `device.read`."
+      parameters:
+        - $ref: "#/components/parameters/Imei"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - name: limit
+          in: query
+          schema: { type: integer, default: 500, maximum: 5000 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AvlRecord" }
+
+  /api/devices/{imei}/raw:
+    get:
+      tags: [devices]
+      summary: Record tersimpan dengan semua nilai IO/CAN, terbaru dulu (berhalaman)
+      description: "Permission: `device.read`. Tanpa `from`: mulai jam 00:00 hari `to`."
+      parameters:
+        - $ref: "#/components/parameters/Imei"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AvlRecord" }
+                      meta: { $ref: "#/components/schemas/Meta" }
+
+  /api/devices/{imei}/installs:
+    get:
+      tags: [devices]
+      summary: Riwayat pemasangan tracker (IMEI) ke unit (plat)
+      description: "Permission: `device.read`."
+      parameters:
+        - $ref: "#/components/parameters/Imei"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DeviceInstall" }
+
+  /api/devices/{imei}/command:
+    post:
+      tags: [perintah]
+      summary: Kirim perintah GPRS (Codec 12) dan tunggu balasan (maks 20 detik)
+      description: |
+        Permission: `device.command`. Tracker harus **online**; bila offline / tidak membalas dalam 20 detik → 409.
+
+        Contoh perintah: `getstatus`, `getgps`, `getver`, `getinfo`, `getrecord`,
+        `setdigout 1` (engine cut lewat DOUT1), `setdigout 0` (lepas engine cut).
+      parameters:
+        - $ref: "#/components/parameters/Imei"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cmd]
+              properties:
+                cmd: { type: string, maxLength: 500, example: getstatus }
+            examples:
+              getstatus: { value: { cmd: getstatus } }
+              getgps: { value: { cmd: getgps } }
+              getver: { value: { cmd: getver } }
+              engineCutOn: { summary: Engine cut ON (DOUT1), value: { cmd: setdigout 1 } }
+              engineCutOff: { summary: Engine cut OFF (DOUT1), value: { cmd: setdigout 0 } }
+      responses:
+        "200":
+          description: Balasan dari tracker
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          response: { type: string, example: "Data Link: 1 GPRS: 1 Phone: 0 SIM: 0 OP: 51010 Signal: 5 ..." }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: Tracker offline, sibuk, atau tidak membalas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/commands:
+    get:
+      tags: [perintah]
+      summary: 300 baris perintah GPRS terakhir (keluar & balasan)
+      description: "Permission: `log.read` atau `device.command`."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/CommandLine" }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Isi "Bearer <access_token>" dari /api/auth/login.'
+
+  parameters:
+    Imei:
+      name: imei
+      in: path
+      required: true
+      description: IMEI tracker, 15 digit
+      schema: { type: string, pattern: "^[0-9]{15}$", example: "350424063817366" }
+    From:
+      name: from
+      in: query
+      description: Awal rentang, epoch ms
+      schema: { type: integer, format: int64 }
+    To:
+      name: to
+      in: query
+      description: Akhir rentang, epoch ms (default sekarang)
+      schema: { type: integer, format: int64 }
+
+  responses:
+    Error:
+      description: Gagal
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: {}
+        meta: { $ref: "#/components/schemas/Meta" }
+        error: {}
+    Meta:
+      type: object
+      properties:
+        total_data: { type: integer }
+        total_page: { type: integer }
+        current_page: { type: integer }
+        limit: { type: integer }
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        expires_in: { type: integer, description: detik }
+        user: { type: object }
+
+    ServerStatus:
+      type: object
+      properties:
+        startedAt: { type: integer, format: int64 }
+        port: { type: integer, description: Port HTTP }
+        lanIps: { type: array, items: { type: string } }
+        tunnel:
+          type: object
+          nullable: true
+          description: Alamat publik yang dipakai tracker
+          properties:
+            host: { type: string }
+            port: { type: integer }
+            provider: { type: string, example: manual }
+        tunnelEnabled: { type: boolean }
+        devicePort: { type: integer, example: 3101 }
+        db:
+          type: object
+          properties:
+            devices: { type: integer }
+            records: { type: integer }
+            events: { type: integer }
+        connected: { type: integer, description: Tracker yang sedang terhubung TCP }
+        devices: { type: integer }
+
+    LogEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        time: { type: integer, format: int64 }
+        kind: { type: string, enum: [conn, raw, data, ack, cmd, error] }
+        imei: { type: string, nullable: true }
+        level: { type: string, enum: [info, warn, error] }
+        text: { type: string }
+
+    FleetEvent:
+      type: object
+      properties:
+        time: { type: integer, format: int64 }
+        imei: { type: string }
+        level: { type: string, enum: [info, warn, crit] }
+        kind: { type: string }
+        text: { type: string }
+
+    CommandLine:
+      type: object
+      properties:
+        imei: { type: string }
+        dir: { type: string, enum: [in, out, err] }
+        text: { type: string }
+        time: { type: integer, format: int64 }
+
+    AvlHead:
+      type: object
+      properties:
+        time: { type: integer, format: int64, description: Waktu GPS }
+        priority: { type: integer }
+        lat: { type: number }
+        lng: { type: number }
+        alt: { type: integer }
+        angle: { type: integer }
+        sats: { type: integer }
+        speed: { type: integer, description: km/jam }
+        eventIo: { type: integer }
+        valid: { type: boolean, description: GPS fix }
+        receivedAt: { type: integer, format: int64, description: Waktu disimpan server }
+
+    AvlRecord:
+      allOf:
+        - $ref: "#/components/schemas/AvlHead"
+        - type: object
+          properties:
+            io:
+              $ref: "#/components/schemas/IoMap"
+
+    IoMap:
+      type: object
+      description: 'AVL IO ID → nilai. Mis. "239" ignition, "240" movement, "16" odometer, "66" external voltage, "21" GSM signal, "85" RPM. Lihat /api/io-map.'
+      additionalProperties: true
+      example: { "239": 1, "240": 1, "21": 5, "66": 27450, "16": 1234567 }
+
+    DevicePos:
+      type: object
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+        angle: { type: integer }
+        time: { type: integer, format: int64 }
+
+    Device:
+      type: object
+      properties:
+        imei: { type: string }
+        name: { type: string, nullable: true }
+        plate: { type: string, nullable: true }
+        vehicle: { type: string, nullable: true }
+        payloadTon: { type: number }
+        unitType: { type: string, enum: [DT, EX, LV, SUPPORT] }
+        brand: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        trackerModel: { type: string, nullable: true, example: FMC150 }
+        bucketM3: { type: number, nullable: true }
+        online: { type: boolean, description: Sedang terhubung TCP }
+        remote: { type: string, nullable: true, description: IP:port koneksi tracker }
+        connectedAt: { type: integer, format: int64, nullable: true }
+        lastSeen: { type: integer, format: int64, nullable: true }
+        firstSeen: { type: integer, format: int64, nullable: true }
+        last: { allOf: [{ $ref: "#/components/schemas/AvlHead" }], nullable: true }
+        pos: { allOf: [{ $ref: "#/components/schemas/DevicePos" }], nullable: true }
+        io: { $ref: "#/components/schemas/IoMap" }
+        ioTime:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+        records: { type: integer }
+
+    DeviceDetail:
+      allOf:
+        - $ref: "#/components/schemas/Device"
+        - type: object
+          properties:
+            history:
+              type: array
+              items:
+                type: object
+                properties:
+                  t: { type: integer, format: int64 }
+                  lat: { type: number }
+                  lng: { type: number }
+                  v: { type: boolean }
+                  speed: { type: integer }
+                  angle: { type: integer }
+                  sats: { type: integer }
+                  ign: {}
+                  ext: {}
+
+    UpdateDeviceRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 60 }
+        plate: { type: string, maxLength: 60 }
+        vehicle: { type: string, maxLength: 60 }
+        payloadTon: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 500 }
+        unitType: { type: string, enum: [DT, EX, LV, SUPPORT] }
+        brand: { type: string, maxLength: 60 }
+        model: { type: string, maxLength: 60 }
+        trackerModel: { type: string, maxLength: 30, example: FMC650 }
+        bucketM3: { type: number, minimum: 0, maximum: 100 }
+
+    DeviceInstall:
+      type: object
+      properties:
+        id: { type: string }
+        imei: { type: string }
+        plate: { type: string }
+        name: { type: string, nullable: true }
+        installedAt: { type: integer, format: int64 }
+        removedAt: { type: integer, format: int64, nullable: true }

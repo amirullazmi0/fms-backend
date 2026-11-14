@@ -65,6 +65,9 @@ Balasan server, satu baris per objek:
 Perilaku alat JSON:
 
 - Alat baru otomatis terdaftar saat data pertama masuk (event "Alat baru terdaftar (JSON)").
+- `trackerModel` alat JSON otomatis diisi `"JSON"` (hanya kalau masih kosong, isian manual tidak ditimpa).
+  Dashboard memakainya untuk label cadangan (`JSON 50010`), label "ID" (bukan "IMEI"), dan teks kartu CAN.
+  Tracker Teltonika (FMC150 / FMC650 / ...) belum terdeteksi otomatis: model diisi manual di form "Info unit".
 - Di API HTTP, `{imei}` = `device_id` alat JSON (mis. `GET /api/devices/50010`). Validasi ID alat di HTTP
   memakai tag `device_id` (`pkg/validator`): IMEI 15 digit atau `A-Z a-z 0-9 _ -` maks 32 karakter.
   Handshake Teltonika tetap wajib IMEI 15 digit.

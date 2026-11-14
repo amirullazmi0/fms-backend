@@ -37,6 +37,9 @@ var jsonIDPattern = validator.DeviceIDPattern
 // tidak mengikuti socket. Alat dianggap offline kalau tidak ada data selama ini.
 const jsonOfflineAfter = 3 * time.Minute
 
+// JSONTrackerModel: tracker_model yang diisi otomatis untuk alat yang masuk lewat jalur JSON.
+const JSONTrackerModel = "JSON"
+
 type jsonRecord struct {
 	Epoch     json.Number `json:"epoch"`
 	DeviceID  any         `json:"device_id"`
@@ -246,9 +249,21 @@ func (t *Tracker) touchJSONDevice(ctx context.Context, id, remote string) error 
 	if err := t.devices.MarkConnected(ctx, id, remote); err != nil {
 		return err
 	}
+	// Model tracker = "JSON" (jalur masuknya pasti), kecuali sudah diisi manual.
+	t.mu.Lock()
+	needModel := t.getDevice(id).TrackerModel == nil || *t.getDevice(id).TrackerModel == ""
+	t.mu.Unlock()
+	if needModel {
+		if err := t.devices.SetTrackerModelIfEmpty(ctx, id, JSONTrackerModel); err != nil {
+			return err
+		}
+	}
 	now := time.Now().UnixMilli()
 	t.mu.Lock()
 	d := t.getDevice(id)
+	if needModel && (d.TrackerModel == nil || *d.TrackerModel == "") {
+		d.TrackerModel = strp(JSONTrackerModel)
+	}
 	wasOnline := d.Online
 	d.Online = true
 	d.Remote = strp(remote)

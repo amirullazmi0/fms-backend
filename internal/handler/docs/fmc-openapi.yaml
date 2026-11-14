@@ -68,6 +68,7 @@ info:
 
     Catatan alat JSON:
     - Terdaftar otomatis saat data pertama masuk; `{imei}` di endpoint halaman ini = `device_id`-nya (mis. `50010`).
+    - `trackerModel` otomatis `"JSON"` (kalau belum diisi manual). Model Teltonika (FMC150 / FMC650) diisi manual.
     - Online selama data masuk, **offline setelah 3 menit tanpa data** (tidak mengikuti socket).
     - Perintah Codec 12 (`POST /api/devices/{imei}/command`) tidak berlaku untuk alat JSON.
 

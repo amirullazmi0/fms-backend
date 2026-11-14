@@ -21,6 +21,8 @@ type DeviceRepository interface {
 	EnsureDevice(ctx context.Context, imei string) (bool, error)
 	MarkConnected(ctx context.Context, imei, remote string) error
 	SetDeviceMeta(ctx context.Context, imei string, m dto.DeviceMeta, updatedBy string) error
+	// SetTrackerModelIfEmpty fills tracker_model only when nobody set it yet.
+	SetTrackerModelIfEmpty(ctx context.Context, imei, model string) error
 	DeleteDevice(ctx context.Context, imei, deletedBy string) (bool, error)
 
 	// SaveRecords stores one packet in a transaction and returns the records that are
@@ -106,6 +108,16 @@ func (r *deviceRepository) MarkConnected(ctx context.Context, imei, remote strin
 		Set("last_seen", now).
 		Set("last_remote", remote).
 		Where("imei = $1", imei).
+		ExecuteContext(ctx, r.db)
+	return err
+}
+
+func (r *deviceRepository) SetTrackerModelIfEmpty(ctx context.Context, imei, model string) error {
+	_, err := database.NewUpdateBuilder("devices").
+		Set("tracker_model", model).
+		SetRaw("updated_at", "CURRENT_TIMESTAMP").
+		Where("imei = $1", imei).
+		Where("(tracker_model IS NULL OR tracker_model = '')").
 		ExecuteContext(ctx, r.db)
 	return err
 }

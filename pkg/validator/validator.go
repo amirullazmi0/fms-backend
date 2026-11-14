@@ -21,6 +21,7 @@ func InitValidator() {
 	validate.RegisterValidation("postal_code_id", validatePostalCodeID)
 	validate.RegisterValidation("future_date", validateFutureDate)
 	validate.RegisterValidation("hhmm", validateHHMM)
+	validate.RegisterValidation("device_id", validateDeviceID)
 
 	// Report errors with the JSON field name (e.g. "loadingId"), which is what the frontend sends.
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
@@ -37,6 +38,14 @@ var hhmmPattern = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
 // validateHHMM validates a 24h clock time "HH:MM"
 func validateHHMM(fl validator.FieldLevel) bool {
 	return hhmmPattern.MatchString(fl.Field().String())
+}
+
+// DeviceIDPattern: tracker id. Teltonika = IMEI 15 digit, JSON tracker = device_id
+// (letters, digits, _ -, max 32). Same rule as internal/tracker/jsonconn.go.
+var DeviceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+
+func validateDeviceID(fl validator.FieldLevel) bool {
+	return DeviceIDPattern.MatchString(fl.Field().String())
 }
 
 // validatePhoneID validates Indonesian phone number format
@@ -124,6 +133,8 @@ func formatErrorMessage(e validator.FieldError) string {
 		return "Date must be in the future"
 	case "hhmm":
 		return fmt.Sprintf("%s must use HH:MM format", e.Field())
+	case "device_id":
+		return fmt.Sprintf("%s must be a device id (IMEI or letters, digits, _ -, max 32)", e.Field())
 	case "uuid":
 		return fmt.Sprintf("%s must be a valid id", e.Field())
 	case "nefield":

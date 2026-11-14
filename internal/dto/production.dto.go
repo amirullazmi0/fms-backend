@@ -119,7 +119,7 @@ type AvailabilityQuery struct {
 	From     int64  `form:"from"`
 	To       int64  `form:"to"`
 	Bucket   string `form:"bucket" validate:"omitempty,oneof=total day month"`
-	Imei     string `form:"imei" validate:"omitempty,len=15,numeric"`
+	Imei     string `form:"imei" validate:"omitempty,device_id"`
 	UnitType string `form:"unitType" validate:"omitempty,oneof=DT EX LV SUPPORT"`
 }
 

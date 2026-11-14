@@ -22,15 +22,16 @@ import (
 	"io"
 	"math"
 	"net"
-	"regexp"
+
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/amirullazmi0/fms-backend/internal/dto"
+	"github.com/amirullazmi0/fms-backend/pkg/validator"
 )
 
-var jsonIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+var jsonIDPattern = validator.DeviceIDPattern
 
 // jsonOfflineAfter: alat JSON biasanya buka-tutup koneksi tiap kirim, jadi status online
 // tidak mengikuti socket. Alat dianggap offline kalau tidak ada data selama ini.

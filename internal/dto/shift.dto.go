@@ -140,7 +140,7 @@ type ShiftListQuery struct {
 
 type AssignmentRequest struct {
 	DriverID string  `json:"driverId" validate:"required,uuid"`
-	Imei     string  `json:"imei" validate:"required,len=15,numeric"`
+	Imei     string  `json:"imei" validate:"required,device_id"`
 	RouteID  *string `json:"routeId" validate:"omitempty,uuid"`
 	// UnloadingID: stockpile / jetty of the route for this unit (null = the route's main one).
 	UnloadingID *string `json:"unloadingId" validate:"omitempty,uuid"`

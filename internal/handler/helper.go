@@ -83,7 +83,7 @@ func validUUID(c *gin.Context, name string) (string, bool) {
 func validImei(c *gin.Context) (string, bool) {
 	imei := c.Param("imei")
 	if err := validator.Validate(struct {
-		Imei string `validate:"len=15,numeric"`
+		Imei string `validate:"device_id"`
 	}{imei}); err != nil {
 		response.Error(c, http.StatusNotFound, "Alat tidak ditemukan", nil)
 		return "", false

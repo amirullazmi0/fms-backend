@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: FMS – Integrasi Tracker FMC150 / FMC650
-  version: "1.0"
+  title: FMS – Integrasi Tracker FMC150 / FMC650 / JSON
+  version: "1.1"
   description: |
-    API HTTP backend FMS yang berhubungan dengan tracker Teltonika **FMC150 / FMC650**:
+    API HTTP backend FMS yang berhubungan dengan tracker Teltonika **FMC150 / FMC650** dan tracker **JSON**:
     cek tracker yang terhubung, baca data AVL yang masuk, kirim perintah Codec 12, dan pantau log koneksi.
 
     ## Koneksi tracker → backend (TCP, bukan HTTP)
@@ -27,6 +27,51 @@ info:
 
     Konfigurasi tracker lewat SMS (diawali dua spasi):
     `  setparam 2001:internet;2004:fms-backend.apps.arulize.com;2005:3101;2006:0`
+
+    ## Dua format di port yang sama
+    Server melihat **byte pertama** yang masuk di port `3101`:
+
+    | Byte pertama | Jalur |
+    |---|---|
+    | `{` atau `[` | **JSON** (tracker non-Teltonika / sistem pihak ketiga) |
+    | lainnya | **Teltonika** (handshake IMEI + Codec 8/8E/12, alur di atas) |
+
+    Data yang bukan Teltonika dan bukan JSON ditolak, koneksi diputus
+    (di pengirim terlihat sebagai `connection reset` / `WinError 10054`).
+
+    ## Jalur JSON (TCP)
+    Kirim objek JSON langsung lewat TCP ke `fms-backend.apps.arulize.com:3101`, tanpa handshake.
+    Satu atau beberapa objek per koneksi (boleh dipisah newline); boleh buka-tutup koneksi tiap kirim.
+
+    ```json
+    {"data":{"epoch":1794556916,"device_id":50010,"latitude":-6.190866,"longitude":106.764735,
+             "altitude":62.1,"speed":0.06,"io1":0,"io2":1,"io3":1,"io4":1,
+             "flag":"1","rs232":"","rs485":""}}
+    ```
+
+    Juga diterima: `"data"` berupa array, objek tanpa pembungkus `data`, atau array di level atas.
+    Skema lengkap: **JsonTrackerPayload** di bagian Schemas.
+
+    | Field | Wajib | Arti |
+    |---|---|---|
+    | `device_id` | ya | ID alat (pengganti IMEI): angka/string, `A-Z a-z 0-9 _ -`, maks 32 karakter |
+    | `latitude`, `longitude` | ya | Posisi. `0,0` = tidak valid |
+    | `epoch` | tidak | Waktu GPS, detik atau milidetik. Kosong = waktu server |
+    | `altitude`, `speed` | tidak | Meter, km/h (dibulatkan) |
+    | `angle`, `satellites` | tidak | Arah (derajat), jumlah satelit |
+    | `io1`–`io4` | tidak | DIN1–DIN4 (AVL ID `1`–`4`) |
+    | `flag`, `rs232`, `rs485` | tidak | Diterima, belum disimpan |
+
+    Server membalas **satu baris JSON per objek**: `{"status":"ok","saved":1}` atau
+    `{"status":"error","error":"..."}` (skema **JsonTrackerReply**). `saved: 0` = record yang sama
+    (alat + `epoch`) sudah ada, jadi kiriman ulang aman.
+
+    Catatan alat JSON:
+    - Terdaftar otomatis saat data pertama masuk; `{imei}` di endpoint halaman ini = `device_id`-nya (mis. `50010`).
+    - Online selama data masuk, **offline setelah 3 menit tanpa data** (tidak mengikuti socket).
+    - Perintah Codec 12 (`POST /api/devices/{imei}/command`) tidak berlaku untuk alat JSON.
+
+    Tes cepat: `echo '{"data":{"device_id":"TEST1","latitude":-6.19,"longitude":106.76}}' | nc fms-backend.apps.arulize.com 3101`
 
     ## Cara memakai halaman ini
     1. Jalankan **POST /api/auth/login**, salin `data.access_token`.
@@ -435,8 +480,8 @@ components:
       name: imei
       in: path
       required: true
-      description: IMEI tracker, 15 digit
-      schema: { type: string, pattern: "^[0-9]{15}$", example: "350424063817366" }
+      description: ID alat. Tracker Teltonika = IMEI 15 digit; tracker JSON = `device_id` (huruf, angka, `_` `-`, maks 32)
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,32}$", example: "350424063817366" }
     From:
       name: from
       in: query
@@ -456,6 +501,49 @@ components:
           schema: { $ref: "#/components/schemas/Envelope" }
 
   schemas:
+    JsonTrackerRecord:
+      type: object
+      description: Satu record dari tracker JSON (dikirim lewat TCP port 3101, bukan HTTP).
+      required: [device_id, latitude, longitude]
+      properties:
+        device_id:
+          oneOf: [{ type: string }, { type: integer }]
+          description: ID alat, huruf/angka/`_`/`-`, maks 32 karakter
+          example: 50010
+        epoch: { type: number, description: "Waktu GPS, detik atau milidetik (kosong = waktu server)", example: 1794556916 }
+        latitude: { type: number, minimum: -90, maximum: 90, example: -6.190866 }
+        longitude: { type: number, minimum: -180, maximum: 180, example: 106.764735 }
+        altitude: { type: number, description: meter, example: 62.1 }
+        speed: { type: number, description: km/h, example: 0.06 }
+        angle: { type: number, description: derajat 0-359 }
+        satellites: { type: integer }
+        io1: { type: number, description: "DIN1 (AVL ID 1)", example: 0 }
+        io2: { type: number, description: "DIN2 (AVL ID 2)", example: 1 }
+        io3: { type: number, description: "DIN3 (AVL ID 3)", example: 1 }
+        io4: { type: number, description: "DIN4 (AVL ID 4)", example: 1 }
+        flag: { description: Diterima, belum disimpan, example: "1" }
+        rs232: { type: string, description: Diterima, belum disimpan }
+        rs485: { type: string, description: Diterima, belum disimpan }
+    JsonTrackerPayload:
+      description: |
+        Isi yang dikirim tracker JSON lewat TCP. Bentuk yang diterima:
+        `{"data": {...}}`, `{"data": [...]}`, `{...}` atau `[...]`.
+      oneOf:
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - { $ref: "#/components/schemas/JsonTrackerRecord" }
+                - { type: array, items: { $ref: "#/components/schemas/JsonTrackerRecord" } }
+        - { $ref: "#/components/schemas/JsonTrackerRecord" }
+        - { type: array, items: { $ref: "#/components/schemas/JsonTrackerRecord" } }
+    JsonTrackerReply:
+      type: object
+      description: Balasan server per objek JSON (satu baris, diakhiri newline).
+      properties:
+        status: { type: string, enum: [ok, error] }
+        saved: { type: integer, description: "Record baru tersimpan (0 = sudah ada / kiriman ulang)", example: 1 }
+        error: { type: string, example: "device_id tidak valid ../x" }
     Envelope:
       type: object
       properties:

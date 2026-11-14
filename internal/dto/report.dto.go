@@ -112,7 +112,7 @@ type ReportQuery struct {
 	Route  string `form:"route" validate:"omitempty,uuid"`
 	Driver string `form:"driver" validate:"omitempty,uuid"`
 	Shift  string `form:"shift" validate:"omitempty,uuid"`
-	Imei   string `form:"imei" validate:"omitempty,len=15,numeric"`
+	Imei   string `form:"imei" validate:"omitempty,device_id"`
 	Role   string `form:"role" validate:"omitempty,oneof=loading unloading"`
 	Limit  int    `form:"limit"`
 	Offset int    `form:"offset"`

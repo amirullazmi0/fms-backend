@@ -77,14 +77,14 @@ type UnitStatusInput struct {
 
 // SetUnitStatusRequest: supervisor sets a unit's status by hand.
 type SetUnitStatusRequest struct {
-	Imei      string  `json:"imei" validate:"required,len=15,numeric"`
+	Imei      string  `json:"imei" validate:"required,device_id"`
 	DelayCode string  `json:"delayCode" validate:"required,max=20"`
 	StartAt   int64   `json:"startAt"` // 0 = now
 	Note      *string `json:"note" validate:"omitempty,max=200"`
 }
 
 type UnitStatusQuery struct {
-	Imei string `form:"imei" validate:"omitempty,len=15,numeric"`
+	Imei string `form:"imei" validate:"omitempty,device_id"`
 	From int64  `form:"from"`
 	To   int64  `form:"to"`
 }

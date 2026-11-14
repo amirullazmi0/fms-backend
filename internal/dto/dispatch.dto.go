@@ -15,7 +15,7 @@ type FleetLoader struct {
 
 // SetLoaderRequest: put an excavator on the fleet (imei) or take it off (imei empty).
 type SetLoaderRequest struct {
-	Imei            string   `json:"imei" validate:"omitempty,len=15,numeric"`
+	Imei            string   `json:"imei" validate:"omitempty,device_id"`
 	ProductivityTph *float64 `json:"productivityTph" validate:"omitempty,gt=0,lte=10000"`
 }
 
@@ -71,7 +71,7 @@ type FleetMove struct {
 
 // MoveUnitRequest: pindahkan unit (DT) ke fleet lain.
 type MoveUnitRequest struct {
-	Imei      string `json:"imei" validate:"required,len=15,numeric"`
+	Imei      string `json:"imei" validate:"required,device_id"`
 	ToRouteID string `json:"toRouteId" validate:"required,uuid"`
 }
 

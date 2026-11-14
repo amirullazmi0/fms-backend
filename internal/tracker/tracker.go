@@ -78,18 +78,21 @@ type Tracker struct {
 	counts  dto.DBCounts
 	tunnel  *dto.TunnelInfo
 	onLate  func(imei string, from, to int64)
+	// jsonTimers: offline timer per JSON device (see jsonconn.go).
+	jsonTimers map[string]*time.Timer
 }
 
 func New(cfg *config.Config, devices repository.DeviceRepository, events repository.EventRepository, hub *sse.Hub) *Tracker {
 	return &Tracker{
-		cfg:       cfg,
-		devices:   devices,
-		events:    events,
-		hub:       hub,
-		startedAt: time.Now().UnixMilli(),
-		state:     map[string]*deviceState{},
-		conns:     map[string]*deviceConn{},
-		pending:   map[string][]*commandJob{},
+		cfg:        cfg,
+		devices:    devices,
+		events:     events,
+		hub:        hub,
+		startedAt:  time.Now().UnixMilli(),
+		state:      map[string]*deviceState{},
+		conns:      map[string]*deviceConn{},
+		pending:    map[string][]*commandJob{},
+		jsonTimers: map[string]*time.Timer{},
 	}
 }
 

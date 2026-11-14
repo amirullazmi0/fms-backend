@@ -101,6 +101,10 @@ func (t *Tracker) handle(ctx context.Context, raw net.Conn) {
 	if _, err := io.ReadFull(raw, head); err != nil {
 		return
 	}
+	if isJSONStart(head[0]) {
+		t.handleJSON(ctx, raw, c, head) // jalur JSON (tracker non-Teltonika), lihat jsonconn.go
+		return
+	}
 	n := int(binary.BigEndian.Uint16(head))
 	if n == 0 || n > 64 {
 		t.Log("conn", "", fmt.Sprintf("Tolak %s: bukan protokol Teltonika", remote), "warn")
